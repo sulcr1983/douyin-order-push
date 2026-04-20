@@ -1,6 +1,9 @@
 # 敏感数据文件
-csv/
+Qmaster/
+tianyixinxuan/
 .env
+orders_qmaster.db
+orders_tianyixinxuan.db
 orders_storage_v5.db
 
 # 其他常规忽略项

@@ -7,127 +7,211 @@ import sqlite3
 from datetime import datetime
 from dotenv import load_dotenv
 
-# 加载环境变量
 load_dotenv()
 
-# Webhook URL
-WEBHOOK_URL = os.getenv('WECOM_WEBHOOK_URL')
+WEBHOOK_URLS = {
+    'Qmaster': os.getenv('WECOM_WEBHOOK_URL_QMASTER', ''),
+    'tianyixinxuan': os.getenv('WECOM_WEBHOOK_URL_TIANYIXINXUAN', '')
+}
 
-# 数据库文件
-DB_FILE = os.getenv('DB_FILE', 'orders_storage_v5.db')
+DB_FILES = {
+    'Qmaster': os.getenv('DB_FILE_QMASTER', 'orders_qmaster.db'),
+    'tianyixinxuan': os.getenv('DB_FILE_TIANYIXINXUAN', 'orders_tianyixinxuan.db')
+}
 
-# CSV文件夹路径
-CSV_FOLDER_PATH = os.getenv('CSV_FOLDER_PATH', '')
+SHOP_CONFIGS = {
+    'Qmaster': {'folder': 'Qmaster', 'db': DB_FILES['Qmaster'], 'webhook': WEBHOOK_URLS['Qmaster']},
+    'tianyixinxuan': {'folder': 'tianyixinxuan', 'db': DB_FILES['tianyixinxuan'], 'webhook': WEBHOOK_URLS['tianyixinxuan']}
+}
 
 
-def get_latest_csv(folder_path):
-    """获取文件夹中最新的CSV文件"""
+def get_latest_file(folder_path, extensions=['.csv', '.xlsx']):
     if not folder_path:
         folder_path = os.path.dirname(os.path.abspath(__file__))
-    
+
     print(f"正在扫描文件夹: {folder_path}")
     if not os.path.exists(folder_path):
-        raise Exception(f"错误：指定的文件夹不存在，请检查路径。")
-    
-    csv_files = []
+        return None, None
+
+    files = []
     for file in os.listdir(folder_path):
-        if file.endswith('.csv'):
+        if any(file.lower().endswith(ext) for ext in extensions):
             file_path = os.path.join(folder_path, file)
             mtime = os.path.getmtime(file_path)
-            csv_files.append((file_path, mtime))
-    
-    if not csv_files:
-        raise Exception("错误：在指定文件夹中未找到任何 CSV 文件，请检查路径。")
-    
-    csv_files.sort(key=lambda x: x[1], reverse=True)
-    latest_file = csv_files[0][0]
-    
+            files.append((file_path, mtime))
+
+    if not files:
+        return None, None
+
+    files.sort(key=lambda x: x[1], reverse=True)
+    latest_file = files[0][0]
+
     mtime = os.path.getmtime(latest_file)
     formatted_time = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
-    
-    print(f"已自动锁定最新订单文件: [{os.path.basename(latest_file)}] (创建时间: {formatted_time})")
-    return latest_file
+
+    print(f"已自动锁定最新文件: [{os.path.basename(latest_file)}] (创建时间: {formatted_time})")
+    return latest_file, os.path.splitext(latest_file)[1].lower()
 
 
 def time_to_timestamp(time_str):
-    """将时间字符串转换为13位毫秒级Unix时间戳"""
     try:
         cleaned_time = str(time_str).strip()
-        dt = datetime.strptime(cleaned_time, '%Y-%m-%d %H:%M:%S')
+        if not cleaned_time:
+            raise ValueError("时间字符串为空")
+
+        dt = pd.to_datetime(cleaned_time, errors='coerce')
+        if pd.isna(dt):
+            raise ValueError(f"无法解析时间: {cleaned_time}")
+
         timestamp = int(dt.timestamp() * 1000)
         return str(timestamp)
-    except Exception as e:
+    except Exception:
         timestamp = int(datetime.now().timestamp() * 1000)
         return str(timestamp)
 
 
-def init_db():
-    """初始化数据库"""
-    db_dir = os.path.dirname(DB_FILE)
+def init_db(db_file):
+    db_dir = os.path.dirname(db_file)
     if db_dir and not os.path.exists(db_dir):
         os.makedirs(db_dir)
-    
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    
-    # 创建orders表（新增 wecom_record_id 字段）
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS orders (
-        sub_order_id TEXT PRIMARY KEY,
-        order_status TEXT,
-        main_order_id TEXT,
-        payment_time TEXT,
-        shipping_time TEXT,
-        product_name TEXT,
-        quantity INTEGER,
-        merchant_income REAL,
-        province TEXT,
-        city TEXT,
-        district TEXT,
-        address TEXT,
-        full_address TEXT,
-        express_info TEXT,
-        product_id TEXT,
-        last_sync_time TIMESTAMP,
-        wecom_record_id TEXT
-    )
-    ''')
-    
-    # 兼容旧数据库：尝试追加 wecom_record_id 列
+
     try:
-        cursor.execute("ALTER TABLE orders ADD COLUMN wecom_record_id TEXT")
-        print("已升级数据库表结构，新增 wecom_record_id 字段")
-    except sqlite3.OperationalError:
-        # 列已存在，直接忽略
-        pass
-        
-    conn.commit()
-    conn.close()
-    print("数据库初始化完成")
+        with sqlite3.connect(db_file) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS orders (
+                sub_order_id TEXT PRIMARY KEY,
+                order_status TEXT,
+                main_order_id TEXT,
+                payment_time TEXT,
+                shipping_time TEXT,
+                product_name TEXT,
+                quantity INTEGER,
+                merchant_income REAL,
+                province TEXT,
+                city TEXT,
+                district TEXT,
+                address TEXT,
+                full_address TEXT,
+                express_info TEXT,
+                product_id TEXT,
+                last_sync_time TIMESTAMP,
+                wecom_record_id TEXT
+            )
+            ''')
+
+            try:
+                cursor.execute("ALTER TABLE orders ADD COLUMN wecom_record_id TEXT")
+                print("已升级数据库表结构，新增 wecom_record_id 字段")
+            except sqlite3.OperationalError:
+                pass
+
+            conn.commit()
+        print(f"数据库 {db_file} 初始化完成")
+    except Exception as e:
+        print(f"数据库初始化失败: {e}")
+        raise
 
 
-def update_db_record_id(sub_order_id, record_id):
-    """将企业微信返回的 record_id 保存到本地数据库"""
+def update_db_record_id(db_file, sub_order_id, record_id):
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("UPDATE orders SET wecom_record_id = ? WHERE sub_order_id = ?", (record_id, sub_order_id))
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE orders SET wecom_record_id = ? WHERE sub_order_id = ?", (record_id, sub_order_id))
+            conn.commit()
     except Exception as e:
         print(f"保存企业微信 record_id 失败: {e}")
 
 
-def read_csv_file(file_path):
+def insert_or_update_db(db_file, row, action, record_id=None):
+    try:
+        with sqlite3.connect(db_file) as conn:
+            try:
+                cursor = conn.cursor()
+                current_time = datetime.now().isoformat()
+                shipping_time = row.get('发货时间', '')
+
+                if action == 'add':
+                    cursor.execute('''
+                    INSERT OR REPLACE INTO orders (
+                        sub_order_id, order_status, main_order_id, payment_time,
+                        shipping_time, product_name, quantity, merchant_income,
+                        province, city, district, address, full_address, express_info,
+                        product_id, last_sync_time, wecom_record_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        row['子订单编号'], row['订单状态'], row['主订单编号'], row['支付完成时间'],
+                        shipping_time, row['选购商品'], int(row['商品数量']), float(row['商家收入金额']),
+                        row['省'], row['市'], row['区'], row['详细地址'], row['合并收货地址'],
+                        row['提取后的快递信息'], row['商品ID'], current_time, record_id
+                    ))
+                elif action == 'update':
+                    cursor.execute('''UPDATE orders SET
+                        order_status=?, main_order_id=?, payment_time=?, shipping_time=?,
+                        product_name=?, quantity=?, merchant_income=?, province=?, city=?,
+                        district=?, address=?, full_address=?, express_info=?, product_id=?,
+                        last_sync_time=?, wecom_record_id=?
+                        WHERE sub_order_id=?''',
+                        (row['订单状态'], row['主订单编号'], row['支付完成时间'], shipping_time,
+                         row['选购商品'], int(row['商品数量']), float(row['商家收入金额']),
+                         row['省'], row['市'], row['区'], row['详细地址'], row['合并收货地址'],
+                         row['提取后的快递信息'], row['商品ID'], current_time, record_id,
+                         row['子订单编号'])
+                    )
+                conn.commit()
+                return True
+            except Exception as e:
+                conn.rollback()
+                raise e
+    except Exception as e:
+        print(f"数据库操作失败: {e}")
+        return False
+
+
+def read_file(file_path, file_ext):
     encodings = ['utf-8-sig', 'gbk']
-    for encoding in encodings:
+
+    if file_ext == '.csv':
+        for encoding in encodings:
+            try:
+                df = pd.read_csv(file_path, encoding=encoding)
+                print(f"成功读取CSV文件，使用编码: {encoding}")
+                return df
+            except PermissionError:
+                raise Exception("文件正在被占用，请关闭 Excel 后重试")
+            except Exception:
+                continue
+        raise Exception("无法读取CSV文件，请检查文件编码")
+
+    elif file_ext in ['.xlsx', '.xls']:
         try:
-            df = pd.read_csv(file_path, encoding=encoding)
-            print(f"成功读取CSV文件，使用编码: {encoding}")
-            return df
-        except Exception:
-            continue
-    raise Exception("无法读取CSV文件，请检查文件编码")
+            try:
+                df = pd.read_excel(file_path, engine='openpyxl')
+                print(f"成功读取Excel文件(openpyxl引擎)")
+                return df
+            except PermissionError:
+                raise Exception("文件正在被占用，请关闭 Excel 后重试")
+            except Exception:
+                pass
+
+            try:
+                df = pd.read_excel(file_path, engine='xlrd')
+                print(f"成功读取Excel文件(xlrd引擎)")
+                return df
+            except PermissionError:
+                raise Exception("文件正在被占用，请关闭 Excel 后重试")
+            except Exception:
+                pass
+
+            raise Exception(f"无法读取Excel文件，请确保已安装 openpyxl 或 xlrd 库")
+
+        except Exception as e:
+            if "文件正在被占用" in str(e):
+                raise
+            raise Exception(f"无法读取Excel文件，请确保已安装 openpyxl 或 xlrd 库: {e}")
+
+    raise Exception(f"不支持的文件格式: {file_ext}")
 
 
 def get_column_with_alias(df, column_names):
@@ -137,8 +221,12 @@ def get_column_with_alias(df, column_names):
     return None
 
 
+def clean_numeric_value(value):
+    cleaned = re.sub(r'\D', '', str(value))
+    return cleaned if cleaned else '0'
+
+
 def clean_data(df):
-    """清洗数据(逻辑保持不变)"""
     required_columns_map = {
         '订单状态': ['订单状态'], '主订单编号': ['主订单编号', '主订单号'], '子订单编号': ['子订单编号', '子订单号'],
         '支付完成时间': ['支付完成时间', '付款时间', '支付时间'], '选购商品': ['选购商品', '商品名称', '商品'],
@@ -147,155 +235,160 @@ def clean_data(df):
         '详细地址': ['详细地址', '地址'], '快递信息': ['快递信息', '物流信息', '快递'], '商品ID': ['商品ID', '商品id', '商品编码', '商家编码']
     }
     optional_columns_map = {'发货时间': ['发货时间', '出库时间', ' shipping time', 'ship_time']}
-    
+
     actual_columns = {}
     for key, aliases in required_columns_map.items():
         col = get_column_with_alias(df, aliases)
-        if col is None: raise Exception(f"CSV文件缺少必需列: {key}")
+        if col is None:
+            raise Exception(f"文件缺少必需列: {key}，请检查列名是否匹配")
         actual_columns[key] = col
-    
+
     for key, aliases in optional_columns_map.items():
         col = get_column_with_alias(df, aliases)
-        if col is not None: actual_columns[key] = col
-    
+        if col is not None:
+            actual_columns[key] = col
+
     df = df[[actual_columns[key] for key in actual_columns.keys()]].copy()
     df = df.rename(columns={v: k for k, v in actual_columns.items()})
-    
-    def clean_numeric_column(col):
-        return df[col].astype(str).apply(lambda x: re.sub(r'\D', '', x))
-    
-    df['子订单编号'] = clean_numeric_column('子订单编号')
-    df['主订单编号'] = clean_numeric_column('主订单编号')
-    df['商品ID'] = clean_numeric_column('商品ID')
+
+    df['子订单编号'] = df['子订单编号'].astype(str).apply(clean_numeric_value)
+    df['主订单编号'] = df['主订单编号'].astype(str).apply(clean_numeric_value)
+    df['商品ID'] = df['商品ID'].astype(str).apply(clean_numeric_value)
+
+    empty_sub_order_ids = df[df['子订单编号'] == '0']
+    if not empty_sub_order_ids.empty:
+        print(f"警告：发现 {len(empty_sub_order_ids)} 条子订单编号为空或无效的记录，已过滤")
+        df = df[df['子订单编号'] != '0']
+
     df = df.fillna('')
     df['支付完成时间'] = df['支付完成时间'].astype(str).apply(lambda x: x.strip())
-    
+
     def combine_address(row):
         parts = [row['省'], row['市'], row['区']]
         return ''.join([str(part) for part in parts if part and str(part) != 'nan'])
-    
+
     df['合并收货地址'] = df.apply(combine_address, axis=1)
     df = df.drop_duplicates(subset=['子订单编号'], keep='last')
     print(f"清理后剩余唯一子订单数: {len(df)}")
-    
+
     def extract_express_info(info):
-        if not info or info == '': return '无'
+        if not info or info == '':
+            return '无'
         parts = re.split(r'[;,，；]', str(info))
         for part in parts:
-            if re.search(r'[a-zA-Z0-9]{6,}', part): return part.strip()
+            if re.search(r'[a-zA-Z0-9]{6,}', part):
+                return part.strip()
         return str(info).strip()
-    
+
     df['提取后的快递信息'] = df['快递信息'].apply(extract_express_info)
-    
+
     def to_float(value):
-        try: return float(str(value).replace(',', ''))
-        except: return 0.0
+        try:
+            return float(str(value).replace(',', ''))
+        except (ValueError, TypeError):
+            return 0.0
+
+    def to_int(value):
+        try:
+            return int(float(str(value).replace(',', '')))
+        except (ValueError, TypeError):
+            return 0
+
     df['商家收入金额'] = df['商家收入金额'].apply(to_float)
-    
+    df['商品数量'] = df['商品数量'].apply(to_int)
+
     return df
 
 
-def check_and_update_db(df):
-    """检查并更新数据库，返回包含动作策略(add/update)的数据集"""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    
+def get_pending_updates(db_file, df):
     to_push = []
     new_count = update_count = skip_count = 0
-    
+
+    print(f"正在对比本地数据库与文件数据差异...")
+
+    sub_order_ids = df['子订单编号'].tolist()
+    if not sub_order_ids:
+        print(f"数据对比完成：0 条需新增，0 条需更新，0 条已同步过无需处理。")
+        return to_push
+
+    placeholders = ','.join(['?'] * len(sub_order_ids))
+    query = f'''
+    SELECT sub_order_id, order_status, main_order_id, payment_time, shipping_time,
+           product_name, quantity, merchant_income,
+           province, city, district, address, full_address, express_info, product_id,
+           wecom_record_id
+    FROM orders WHERE sub_order_id IN ({placeholders})
+    '''
+
+    with sqlite3.connect(db_file) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, sub_order_ids)
+        db_rows = cursor.fetchall()
+        db_dict = {row[0]: row for row in db_rows}
+
     for _, row in df.iterrows():
         sub_order_id = row['子订单编号']
         order_status = row['订单状态']
-        
-        # 获取所有相关字段，注意提取我们新增的 wecom_record_id
-        cursor.execute('''
-        SELECT order_status, main_order_id, payment_time, shipping_time, 
-               product_name, quantity, merchant_income, 
-               province, city, district, address, full_address, express_info, product_id,
-               wecom_record_id
-        FROM orders WHERE sub_order_id = ?
-        ''', (sub_order_id,))
-        db_row = cursor.fetchone()
-        
-        current_time = datetime.now().isoformat()
         shipping_time = row.get('发货时间', '')
-        
+
+        db_row = db_dict.get(sub_order_id)
+
         if not db_row:
-            # 1. 纯新订单，插入数据库
-            cursor.execute('''
-            INSERT INTO orders (
-                sub_order_id, order_status, main_order_id, payment_time, 
-                shipping_time, product_name, quantity, merchant_income, 
-                province, city, district, address, full_address, express_info, 
-                product_id, last_sync_time
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                sub_order_id, order_status, row['主订单编号'], row['支付完成时间'],
-                shipping_time, row['选购商品'], row['商品数量'], row['商家收入金额'],
-                row['省'], row['市'], row['区'], row['详细地址'], row['合并收货地址'],
-                row['提取后的快递信息'], row['商品ID'], current_time
-            ))
             to_push.append({'action': 'add', 'data': row, 'record_id': None})
             new_count += 1
-            
         else:
             db_wecom_record_id = db_row[-1]
-            # 构建比对值 (排除最后一个元素 wecom_record_id)
             current_values = (
-                order_status, row['主订单编号'], row['支付完成时间'], shipping_time, 
-                row['选购商品'], row['商品数量'], row['商家收入金额'], 
-                row['省'], row['市'], row['区'], row['详细地址'], row['合并收货地址'], 
+                order_status, row['主订单编号'], row['支付完成时间'], shipping_time,
+                row['选购商品'], row['商品数量'], row['商家收入金额'],
+                row['省'], row['市'], row['区'], row['详细地址'], row['合并收货地址'],
                 row['提取后的快递信息'], row['商品ID']
             )
-            
-            # 2. 如果库里有，但没有 record_id (可能是之前推送企微失败的遗留数据)
+
             if not db_wecom_record_id:
-                cursor.execute('''UPDATE orders SET order_status=?, main_order_id=?, payment_time=?, shipping_time=?, product_name=?, quantity=?, merchant_income=?, province=?, city=?, district=?, address=?, full_address=?, express_info=?, product_id=?, last_sync_time=? WHERE sub_order_id=?''', (order_status, row['主订单编号'], row['支付完成时间'], shipping_time, row['选购商品'], row['商品数量'], row['商家收入金额'], row['省'], row['市'], row['区'], row['详细地址'], row['合并收货地址'], row['提取后的快递信息'], row['商品ID'], current_time, sub_order_id))
                 to_push.append({'action': 'add', 'data': row, 'record_id': None})
                 new_count += 1
-                
-            # 3. 数据有变化，且有企微的 record_id，执行真实更新
-            elif current_values != db_row[:-1]:
-                cursor.execute('''UPDATE orders SET order_status=?, main_order_id=?, payment_time=?, shipping_time=?, product_name=?, quantity=?, merchant_income=?, province=?, city=?, district=?, address=?, full_address=?, express_info=?, product_id=?, last_sync_time=? WHERE sub_order_id=?''', (order_status, row['主订单编号'], row['支付完成时间'], shipping_time, row['选购商品'], row['商品数量'], row['商家收入金额'], row['省'], row['市'], row['区'], row['详细地址'], row['合并收货地址'], row['提取后的快递信息'], row['商品ID'], current_time, sub_order_id))
+            elif current_values != db_row[1:-1]:
                 to_push.append({'action': 'update', 'data': row, 'record_id': db_wecom_record_id})
                 update_count += 1
-                
-            # 4. 无变化，跳过
             else:
                 skip_count += 1
-                
-    conn.commit()
-    conn.close()
-    
-    print(f"检测到 {new_count} 条需新增，{update_count} 条需更新，{skip_count} 条已同步过无需处理。")
+
+    print(f"数据对比完成：{new_count} 条需新增，{update_count} 条需更新，{skip_count} 条已同步过无需处理。")
     return to_push
 
 
-def send_data(item, index, total):
-    """发送数据到Webhook，支持 新增(add) 与 更新(update) 动作分流"""
+def send_data(webhook_url, db_file, item, index, total):
     row = item['data']
     action = item['action']
     record_id = item['record_id']
-    
+
+    print(f"[{index+1}/{total}] 正在处理子订单: {row['子订单编号']}，动作: {action}")
+
     payment_time_timestamp = time_to_timestamp(row['支付完成时间'])
     shipping_time = row.get('发货时间', '')
     outbound_status = "已出库" if shipping_time else "待出库"
-    
-    # 统一提取 values，新增和更新的内部格式要求一致
+
+    try:
+        quantity = int(row['商品数量']) if pd.notna(row['商品数量']) else 0
+        merchant_income = float(row['商家收入金额']) if pd.notna(row['商家收入金额']) else 0.0
+    except (ValueError, TypeError) as e:
+        print(f"[{index+1}/{total}] 数据格式错误: 子订单编号={row['子订单编号']}, 错误={e}")
+        return False
+
     values = {
-        "fxNwEq": row['子订单编号'],
-        "fCNsiv": row['商品ID'],
-        "fBK7XT": row['选购商品'],
-        "fy3AU0": int(row['商品数量']),
-        "ff2OiF": float(row['商家收入金额']),
-        "fJ0NdH": [{"text": row['订单状态']}],
+        "fxNwEq": str(row['子订单编号']),
+        "fCNsiv": str(row['商品ID']),
+        "fBK7XT": str(row['选购商品']),
+        "fy3AU0": quantity,
+        "ff2OiF": merchant_income,
+        "fJ0NdH": [{"text": str(row['订单状态'])}],
         "fNuVBy": payment_time_timestamp,
-        "fWJEK9": row['合并收货地址'],
-        "fTMuqw": row['提取后的快递信息'],
+        "fWJEK9": str(row['合并收货地址']),
+        "fTMuqw": str(row['提取后的快递信息']),
         "fzFeek": [{"text": outbound_status}]
     }
-    
-    # 根据动作分发载荷结构
+
     if action == 'add':
         payload = {
             "schema": {
@@ -306,83 +399,143 @@ def send_data(item, index, total):
             },
             "add_records": [{"values": values}]
         }
-    else:  # 'update'
+    else:
         payload = {
             "update_records": [{
                 "record_id": record_id,
                 "values": values
             }]
         }
-    
+
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            response = requests.post(WEBHOOK_URL, json=payload, timeout=10)
-            
-            # 企业微信即便遇到业务错误也会返回200，需检查JSON内的 errcode
+            response = requests.post(webhook_url, json=payload, timeout=10)
+
             try:
                 resp_data = response.json()
                 error_code = resp_data.get('errcode', 0)
-            except:
+            except Exception:
                 resp_data = {}
                 error_code = -1
-                
+
             if response.status_code == 200 and error_code == 0:
                 action_text = "新增" if action == 'add' else "更新"
-                print(f"[{index+1}/{total}] 成功{action_text}子订单: {row['子订单编号']}")
-                
-                # 新增成功后，拦截企微返回的 record_id 存进数据库，为将来的“更新”做准备
+                print(f"[{index+1}/{total}] ✓ 成功{action_text}子订单: {row['子订单编号']}")
+
+                new_record_id = None
                 if action == 'add' and 'add_records' in resp_data:
                     records = resp_data['add_records']
                     if records and len(records) > 0:
                         new_record_id = records[0].get('record_id')
-                        if new_record_id:
-                            update_db_record_id(row['子订单编号'], new_record_id)
-                            
+
+                db_action = 'update' if action == 'update' and new_record_id is None else action
+                db_record_id = new_record_id if new_record_id else record_id
+
+                if insert_or_update_db(db_file, row, db_action, db_record_id):
+                    print(f"[{index+1}/{total}] ✓ 本地数据库已更新")
+                else:
+                    print(f"[{index+1}/{total}] ⚠ 本地数据库更新失败，但API同步成功")
+
                 return True
             else:
-                print(f"[{index+1}/{total}] 同步失败 API报错: errcode={error_code}, errmsg={resp_data.get('errmsg', '')}")
+                print(f"[{index+1}/{total}] ✗ 同步失败 API报错: errcode={error_code}, errmsg={resp_data.get('errmsg', '')}")
                 if attempt < max_retries - 1:
+                    print(f"[{index+1}/{total}] 等待 2 秒后重试...")
                     time.sleep(2)
-        except Exception as e:
-            print(f"[{index+1}/{total}] 发送异常: {e}")
+        except requests.exceptions.Timeout:
+            print(f"[{index+1}/{total}] ✗ 请求超时，正在重试...")
             if attempt < max_retries - 1:
                 time.sleep(2)
+        except requests.exceptions.RequestException as e:
+            print(f"[{index+1}/{total}] ✗ 网络异常: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2)
+        except Exception as e:
+            print(f"[{index+1}/{total}] ✗ 发送异常: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2)
+
+    print(f"[{index+1}/{total}] ✗ 子订单 {row['子订单编号']} 同步失败，已跳过（本地数据库未更新）")
     return False
 
 
-def main():
-    start_time = time.time()
+def sync_shop(shop_name, config):
+    folder = config['folder']
+    db_file = config['db']
+    webhook_url = config['webhook']
+
+    print(f"\n{'='*50}")
+    print(f"开始同步店铺: {shop_name}")
+    print(f"{'='*50}")
+
+    if not webhook_url or not webhook_url.strip():
+        print(f"错误：{shop_name} 的 Webhook URL 未配置，请在 .env 文件中设置 WECOM_WEBHOOK_URL_{shop_name.upper()}")
+        return
+
+    if not os.path.exists(folder):
+        print(f"文件夹不存在，跳过: {folder}")
+        return
+
+    file_path, file_ext = get_latest_file(folder)
+    if not file_path:
+        print(f"在 {folder} 文件夹中未找到任何 CSV 或 Excel 文件，跳过")
+        return
+
     try:
-        init_db()
-        csv_file = get_latest_csv(CSV_FOLDER_PATH)
-        df = read_csv_file(csv_file)
+        print(f"正在读取文件: {file_path}")
+        init_db(db_file)
+        df = read_file(file_path, file_ext)
         cleaned_df = clean_data(df)
-        
-        # to_push 变成了一个包含执行策略的列表
-        to_push = check_and_update_db(cleaned_df)
-        
+
+        if cleaned_df.empty:
+            print(f"警告：{shop_name} 清洗后没有有效订单数据")
+            return
+
+        to_push = get_pending_updates(db_file, cleaned_df)
+
+        if not to_push:
+            print(f"没有需要同步的订单数据")
+            return
+
         total = len(to_push)
+        print(f"开始同步，共 {total} 条数据待处理")
         success_count = fail_count = 0
-        
-        # 迭代处理
+
         for index, item in enumerate(to_push):
-            if send_data(item, index, total):
+            if send_data(webhook_url, db_file, item, index, total):
                 success_count += 1
             else:
                 fail_count += 1
             time.sleep(0.5)
-            
-        elapsed_time = time.time() - start_time
-        print("\n=== 同步完成 ===")
+
+        print(f"\n=== {shop_name} 同步完成 ===")
         print(f"总处理订单数: {len(cleaned_df)}")
         print(f"实际发生变动数: {total}")
         print(f"成功数: {success_count}")
         print(f"失败数: {fail_count}")
-        print(f"耗时: {elapsed_time:.2f} 秒")
-        
+
+        if fail_count > 0:
+            print(f"注意：有 {fail_count} 条数据同步失败，本地数据库未更新，下次运行将自动重试")
+
     except Exception as e:
         print(f"\n错误: {e}")
+
+
+def main():
+    start_time = time.time()
+    print("=" * 50)
+    print("订单同步系统启动")
+    print("=" * 50)
+
+    for shop_name, config in SHOP_CONFIGS.items():
+        sync_shop(shop_name, config)
+
+    elapsed_time = time.time() - start_time
+    print(f"\n{'='*50}")
+    print(f"所有店铺同步完成！总耗时: {elapsed_time:.2f} 秒")
+    print(f"{'='*50}")
+
 
 if __name__ == "__main__":
     main()
