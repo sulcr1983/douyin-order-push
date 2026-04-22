@@ -4,10 +4,46 @@ import time
 import re
 import os
 import sqlite3
+import logging
 from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
+
+LOG_FILE = os.getenv('LOG_FILE', 'sync_log.txt')
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+
+EXCLUDE_ORDER_STATUSES = [
+    status.strip() for status in os.getenv('EXCLUDE_ORDER_STATUSES', '已关闭,已取消,未付款,待付款,交易关闭,取消订单').split(',')
+    if status.strip()
+]
+
+MAX_CONSECUTIVE_FAILURES = int(os.getenv('MAX_CONSECUTIVE_FAILURES', '10'))
+
+def setup_logging():
+    logger = logging.getLogger()
+    logger.handlers.clear()
+
+    logger.setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+
+    formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    return logger
+
+logger = setup_logging()
 
 WEBHOOK_URLS = {
     'Qmaster': os.getenv('WECOM_WEBHOOK_URL_QMASTER', ''),
@@ -29,7 +65,7 @@ def get_latest_file(folder_path, extensions=['.csv', '.xlsx']):
     if not folder_path:
         folder_path = os.path.dirname(os.path.abspath(__file__))
 
-    print(f"正在扫描文件夹: {folder_path}")
+    logger.info(f"正在扫描文件夹: {folder_path}")
     if not os.path.exists(folder_path):
         return None, None
 
@@ -49,7 +85,7 @@ def get_latest_file(folder_path, extensions=['.csv', '.xlsx']):
     mtime = os.path.getmtime(latest_file)
     formatted_time = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
 
-    print(f"已自动锁定最新文件: [{os.path.basename(latest_file)}] (创建时间: {formatted_time})")
+    logger.info(f"已自动锁定最新文件: [{os.path.basename(latest_file)}] (创建时间: {formatted_time})")
     return latest_file, os.path.splitext(latest_file)[1].lower()
 
 
@@ -103,14 +139,14 @@ def init_db(db_file):
 
             try:
                 cursor.execute("ALTER TABLE orders ADD COLUMN wecom_record_id TEXT")
-                print("已升级数据库表结构，新增 wecom_record_id 字段")
+                logger.info("已升级数据库表结构，新增 wecom_record_id 字段")
             except sqlite3.OperationalError:
                 pass
 
             conn.commit()
-        print(f"数据库 {db_file} 初始化完成")
+        logger.info(f"数据库 {db_file} 初始化完成")
     except Exception as e:
-        print(f"数据库初始化失败: {e}")
+        logger.error(f"数据库初始化失败: {e}")
         raise
 
 
@@ -121,7 +157,7 @@ def update_db_record_id(db_file, sub_order_id, record_id):
             cursor.execute("UPDATE orders SET wecom_record_id = ? WHERE sub_order_id = ?", (record_id, sub_order_id))
             conn.commit()
     except Exception as e:
-        print(f"保存企业微信 record_id 失败: {e}")
+        logger.error(f"保存企业微信 record_id 失败: {e}")
 
 
 def insert_or_update_db(db_file, row, action, record_id=None):
@@ -165,7 +201,7 @@ def insert_or_update_db(db_file, row, action, record_id=None):
                 conn.rollback()
                 raise e
     except Exception as e:
-        print(f"数据库操作失败: {e}")
+        logger.error(f"数据库操作失败: {e}")
         return False
 
 
@@ -176,10 +212,10 @@ def read_file(file_path, file_ext):
         for encoding in encodings:
             try:
                 df = pd.read_csv(file_path, encoding=encoding)
-                print(f"成功读取CSV文件，使用编码: {encoding}")
+                logger.info(f"成功读取CSV文件，使用编码: {encoding}")
                 return df
             except PermissionError:
-                raise Exception("文件正在被占用，请关闭 Excel 后重试")
+                raise Exception("文件正在被 Excel 占用，请关闭 Excel 后重试，或将文件复制一份再运行。")
             except Exception:
                 continue
         raise Exception("无法读取CSV文件，请检查文件编码")
@@ -188,26 +224,26 @@ def read_file(file_path, file_ext):
         try:
             try:
                 df = pd.read_excel(file_path, engine='openpyxl')
-                print(f"成功读取Excel文件(openpyxl引擎)")
+                logger.info(f"成功读取Excel文件(openpyxl引擎)")
                 return df
             except PermissionError:
-                raise Exception("文件正在被占用，请关闭 Excel 后重试")
+                raise Exception("文件正在被 Excel 占用，请关闭 Excel 后重试，或将文件复制一份再运行。")
             except Exception:
                 pass
 
             try:
                 df = pd.read_excel(file_path, engine='xlrd')
-                print(f"成功读取Excel文件(xlrd引擎)")
+                logger.info(f"成功读取Excel文件(xlrd引擎)")
                 return df
             except PermissionError:
-                raise Exception("文件正在被占用，请关闭 Excel 后重试")
+                raise Exception("文件正在被 Excel 占用，请关闭 Excel 后重试，或将文件复制一份再运行。")
             except Exception:
                 pass
 
             raise Exception(f"无法读取Excel文件，请确保已安装 openpyxl 或 xlrd 库")
 
         except Exception as e:
-            if "文件正在被占用" in str(e):
+            if "文件正在被 Excel 占用" in str(e):
                 raise
             raise Exception(f"无法读取Excel文件，请确保已安装 openpyxl 或 xlrd 库: {e}")
 
@@ -222,11 +258,41 @@ def get_column_with_alias(df, column_names):
 
 
 def clean_numeric_value(value):
-    cleaned = re.sub(r'\D', '', str(value))
+    cleaned = str(value).strip()
     return cleaned if cleaned else '0'
 
 
+def get_order_status_filter():
+    return {
+        'exclude_statuses': EXCLUDE_ORDER_STATUSES,
+        'include_statuses': []
+    }
+
+
+def filter_orders_by_status(df, filter_config):
+    exclude_statuses = filter_config.get('exclude_statuses', [])
+    include_statuses = filter_config.get('include_statuses', [])
+
+    if exclude_statuses:
+        before_count = len(df)
+        df = df[~df['订单状态'].isin(exclude_statuses)]
+        filtered_count = before_count - len(df)
+        if filtered_count > 0:
+            logger.info(f"已过滤 {filtered_count} 条无效订单（订单状态: {', '.join(exclude_statuses)}）")
+
+    if include_statuses:
+        before_count = len(df)
+        df = df[df['订单状态'].isin(include_statuses)]
+        filtered_count = before_count - len(df)
+        if filtered_count > 0:
+            logger.info(f"已过滤 {filtered_count} 条非目标订单（保留: {', '.join(include_statuses)}）")
+
+    return df
+
+
 def clean_data(df):
+    df.columns = df.columns.str.strip()
+
     required_columns_map = {
         '订单状态': ['订单状态'], '主订单编号': ['主订单编号', '主订单号'], '子订单编号': ['子订单编号', '子订单号'],
         '支付完成时间': ['支付完成时间', '付款时间', '支付时间'], '选购商品': ['选购商品', '商品名称', '商品'],
@@ -234,7 +300,7 @@ def clean_data(df):
         '省': ['省', '省份'], '市': ['市', '城市'], '区': ['区', '区县'],
         '详细地址': ['详细地址', '地址'], '快递信息': ['快递信息', '物流信息', '快递'], '商品ID': ['商品ID', '商品id', '商品编码', '商家编码']
     }
-    optional_columns_map = {'发货时间': ['发货时间', '出库时间', ' shipping time', 'ship_time']}
+    optional_columns_map = {'发货时间': ['发货时间', '出库时间', 'shipping time', 'ship_time']}
 
     actual_columns = {}
     for key, aliases in required_columns_map.items():
@@ -257,7 +323,7 @@ def clean_data(df):
 
     empty_sub_order_ids = df[df['子订单编号'] == '0']
     if not empty_sub_order_ids.empty:
-        print(f"警告：发现 {len(empty_sub_order_ids)} 条子订单编号为空或无效的记录，已过滤")
+        logger.warning(f"发现 {len(empty_sub_order_ids)} 条子订单编号为空或无效的记录，已过滤")
         df = df[df['子订单编号'] != '0']
 
     df = df.fillna('')
@@ -269,7 +335,7 @@ def clean_data(df):
 
     df['合并收货地址'] = df.apply(combine_address, axis=1)
     df = df.drop_duplicates(subset=['子订单编号'], keep='last')
-    print(f"清理后剩余唯一子订单数: {len(df)}")
+    logger.info(f"清理后剩余唯一子订单数: {len(df)}")
 
     def extract_express_info(info):
         if not info or info == '':
@@ -297,6 +363,8 @@ def clean_data(df):
     df['商家收入金额'] = df['商家收入金额'].apply(to_float)
     df['商品数量'] = df['商品数量'].apply(to_int)
 
+    df = filter_orders_by_status(df, get_order_status_filter())
+
     return df
 
 
@@ -304,11 +372,11 @@ def get_pending_updates(db_file, df):
     to_push = []
     new_count = update_count = skip_count = 0
 
-    print(f"正在对比本地数据库与文件数据差异...")
+    logger.info("正在对比本地数据库与文件数据差异...")
 
     sub_order_ids = df['子订单编号'].tolist()
     if not sub_order_ids:
-        print(f"数据对比完成：0 条需新增，0 条需更新，0 条已同步过无需处理。")
+        logger.info("数据对比完成：0 条需新增，0 条需更新，0 条已同步过无需处理。")
         return to_push
 
     placeholders = ','.join(['?'] * len(sub_order_ids))
@@ -354,7 +422,7 @@ def get_pending_updates(db_file, df):
             else:
                 skip_count += 1
 
-    print(f"数据对比完成：{new_count} 条需新增，{update_count} 条需更新，{skip_count} 条已同步过无需处理。")
+    logger.info(f"数据对比完成：{new_count} 条需新增，{update_count} 条需更新，{skip_count} 条已同步过无需处理。")
     return to_push
 
 
@@ -363,7 +431,7 @@ def send_data(webhook_url, db_file, item, index, total):
     action = item['action']
     record_id = item['record_id']
 
-    print(f"[{index+1}/{total}] 正在处理子订单: {row['子订单编号']}，动作: {action}")
+    logger.info(f"[{index+1}/{total}] 正在处理子订单: {row['子订单编号']}，动作: {action}")
 
     payment_time_timestamp = time_to_timestamp(row['支付完成时间'])
     shipping_time = row.get('发货时间', '')
@@ -373,7 +441,7 @@ def send_data(webhook_url, db_file, item, index, total):
         quantity = int(row['商品数量']) if pd.notna(row['商品数量']) else 0
         merchant_income = float(row['商家收入金额']) if pd.notna(row['商家收入金额']) else 0.0
     except (ValueError, TypeError) as e:
-        print(f"[{index+1}/{total}] 数据格式错误: 子订单编号={row['子订单编号']}, 错误={e}")
+        logger.error(f"[{index+1}/{total}] 数据格式错误: 子订单编号={row['子订单编号']}, 错误={e}")
         return False
 
     values = {
@@ -421,7 +489,7 @@ def send_data(webhook_url, db_file, item, index, total):
 
             if response.status_code == 200 and error_code == 0:
                 action_text = "新增" if action == 'add' else "更新"
-                print(f"[{index+1}/{total}] ✓ 成功{action_text}子订单: {row['子订单编号']}")
+                logger.info(f"[{index+1}/{total}] ✓ 成功{action_text}子订单: {row['子订单编号']}")
 
                 new_record_id = None
                 if action == 'add' and 'add_records' in resp_data:
@@ -433,30 +501,30 @@ def send_data(webhook_url, db_file, item, index, total):
                 db_record_id = new_record_id if new_record_id else record_id
 
                 if insert_or_update_db(db_file, row, db_action, db_record_id):
-                    print(f"[{index+1}/{total}] ✓ 本地数据库已更新")
+                    logger.info(f"[{index+1}/{total}] ✓ 本地数据库已更新")
                 else:
-                    print(f"[{index+1}/{total}] ⚠ 本地数据库更新失败，但API同步成功")
+                    logger.warning(f"[{index+1}/{total}] ⚠ 本地数据库更新失败，但API同步成功")
 
                 return True
             else:
-                print(f"[{index+1}/{total}] ✗ 同步失败 API报错: errcode={error_code}, errmsg={resp_data.get('errmsg', '')}")
+                logger.error(f"[{index+1}/{total}] ✗ 同步失败 API报错: errcode={error_code}, errmsg={resp_data.get('errmsg', '')}")
                 if attempt < max_retries - 1:
-                    print(f"[{index+1}/{total}] 等待 2 秒后重试...")
+                    logger.info(f"[{index+1}/{total}] 等待 2 秒后重试...")
                     time.sleep(2)
         except requests.exceptions.Timeout:
-            print(f"[{index+1}/{total}] ✗ 请求超时，正在重试...")
+            logger.error(f"[{index+1}/{total}] ✗ 请求超时，正在重试...")
             if attempt < max_retries - 1:
                 time.sleep(2)
         except requests.exceptions.RequestException as e:
-            print(f"[{index+1}/{total}] ✗ 网络异常: {e}")
+            logger.error(f"[{index+1}/{total}] ✗ 网络异常: {e}")
             if attempt < max_retries - 1:
                 time.sleep(2)
         except Exception as e:
-            print(f"[{index+1}/{total}] ✗ 发送异常: {e}")
+            logger.error(f"[{index+1}/{total}] ✗ 发送异常: {e}")
             if attempt < max_retries - 1:
                 time.sleep(2)
 
-    print(f"[{index+1}/{total}] ✗ 子订单 {row['子订单编号']} 同步失败，已跳过（本地数据库未更新）")
+    logger.error(f"[{index+1}/{total}] ✗ 子订单 {row['子订单编号']} 同步失败，已跳过（本地数据库未更新）")
     return False
 
 
@@ -465,76 +533,84 @@ def sync_shop(shop_name, config):
     db_file = config['db']
     webhook_url = config['webhook']
 
-    print(f"\n{'='*50}")
-    print(f"开始同步店铺: {shop_name}")
-    print(f"{'='*50}")
+    logger.info(f"{'='*50}")
+    logger.info(f"开始同步店铺: {shop_name}")
+    logger.info(f"{'='*50}")
 
     if not webhook_url or not webhook_url.strip():
-        print(f"错误：{shop_name} 的 Webhook URL 未配置，请在 .env 文件中设置 WECOM_WEBHOOK_URL_{shop_name.upper()}")
+        logger.error(f"错误：{shop_name} 的 Webhook URL 未配置，请在 .env 文件中设置 WECOM_WEBHOOK_URL_{shop_name.upper()}")
         return
 
     if not os.path.exists(folder):
-        print(f"文件夹不存在，跳过: {folder}")
+        logger.warning(f"文件夹不存在，跳过: {folder}")
         return
 
     file_path, file_ext = get_latest_file(folder)
     if not file_path:
-        print(f"在 {folder} 文件夹中未找到任何 CSV 或 Excel 文件，跳过")
+        logger.warning(f"在 {folder} 文件夹中未找到任何 CSV 或 Excel 文件，跳过")
         return
 
     try:
-        print(f"正在读取文件: {file_path}")
+        logger.info(f"正在读取文件: {file_path}")
         init_db(db_file)
         df = read_file(file_path, file_ext)
         cleaned_df = clean_data(df)
 
         if cleaned_df.empty:
-            print(f"警告：{shop_name} 清洗后没有有效订单数据")
+            logger.warning(f"警告：{shop_name} 清洗后没有有效订单数据")
             return
 
         to_push = get_pending_updates(db_file, cleaned_df)
 
         if not to_push:
-            print(f"没有需要同步的订单数据")
+            logger.info(f"没有需要同步的订单数据")
             return
 
         total = len(to_push)
-        print(f"开始同步，共 {total} 条数据待处理")
+        logger.info(f"开始同步，共 {total} 条数据待处理")
         success_count = fail_count = 0
+        consecutive_failures = 0
 
         for index, item in enumerate(to_push):
             if send_data(webhook_url, db_file, item, index, total):
                 success_count += 1
+                consecutive_failures = 0
             else:
                 fail_count += 1
+                consecutive_failures += 1
+
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    logger.error(f"检测到连续 {consecutive_failures} 次同步失败，已中断当前店铺同步。请检查网络或API状态。")
+                    break
+
             time.sleep(0.5)
 
-        print(f"\n=== {shop_name} 同步完成 ===")
-        print(f"总处理订单数: {len(cleaned_df)}")
-        print(f"实际发生变动数: {total}")
-        print(f"成功数: {success_count}")
-        print(f"失败数: {fail_count}")
+        logger.info(f"\n=== {shop_name} 同步完成 ===")
+        logger.info(f"总处理订单数: {len(cleaned_df)}")
+        logger.info(f"实际发生变动数: {total}")
+        logger.info(f"成功数: {success_count}")
+        logger.info(f"失败数: {fail_count}")
 
         if fail_count > 0:
-            print(f"注意：有 {fail_count} 条数据同步失败，本地数据库未更新，下次运行将自动重试")
+            logger.warning(f"注意：有 {fail_count} 条数据同步失败，本地数据库未更新，下次运行将自动重试")
 
     except Exception as e:
-        print(f"\n错误: {e}")
+        logger.error(f"\n错误: {e}")
 
 
 def main():
     start_time = time.time()
-    print("=" * 50)
-    print("订单同步系统启动")
-    print("=" * 50)
+    logger.info("=" * 50)
+    logger.info("订单同步系统启动")
+    logger.info("=" * 50)
 
     for shop_name, config in SHOP_CONFIGS.items():
         sync_shop(shop_name, config)
 
     elapsed_time = time.time() - start_time
-    print(f"\n{'='*50}")
-    print(f"所有店铺同步完成！总耗时: {elapsed_time:.2f} 秒")
-    print(f"{'='*50}")
+    logger.info(f"\n{'='*50}")
+    logger.info(f"所有店铺同步完成！总耗时: {elapsed_time:.2f} 秒")
+    logger.info(f"{'='*50}")
 
 
 if __name__ == "__main__":
