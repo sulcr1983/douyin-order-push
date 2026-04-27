@@ -14,7 +14,7 @@ LOG_FILE = os.getenv('LOG_FILE', 'sync_log.txt')
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 
 EXCLUDE_ORDER_STATUSES = [
-    status.strip() for status in os.getenv('EXCLUDE_ORDER_STATUSES', '未付款,待付款').split(',')
+    status.strip() for status in os.getenv('EXCLUDE_ORDER_STATUSES', '已关闭,已取消,未付款,待付款,交易关闭,取消订单').split(',')
     if status.strip()
 ]
 
@@ -371,8 +371,6 @@ def clean_data(df):
     df['商家收入金额'] = df['商家收入金额'].apply(to_float)
     df['商品数量'] = df['商品数量'].apply(to_int)
 
-    df = filter_orders_by_status(df, get_order_status_filter())
-
     return df
 
 
@@ -447,12 +445,17 @@ def get_pending_updates(db_file, df):
             )
 
             db_status_has_close = any(kw in db_order_status for kw in ["退款", "取消", "关闭"])
+            db_outbound_status = calc_outbound_status({
+                '订单状态': db_order_status,
+                '售后状态': '',
+                '发货时间': db_row[4]
+            })
             force_update_refund = (outbound_status == "已关闭" and not db_status_has_close)
 
             if not db_wecom_record_id:
                 to_push.append({'action': 'add', 'data': row, 'record_id': None})
                 new_count += 1
-            elif force_update_refund or current_values != db_compare_values:
+            elif force_update_refund or str(current_values) != str(db_compare_values) or db_outbound_status != outbound_status:
                 to_push.append({'action': 'update', 'data': row, 'record_id': db_wecom_record_id})
                 update_count += 1
             else:
@@ -594,6 +597,23 @@ def sync_shop(shop_name, config):
         if cleaned_df.empty:
             logger.warning(f"警告：{shop_name} 清洗后没有有效订单数据")
             return
+
+        sub_order_ids = cleaned_df['子订单编号'].tolist()
+        if sub_order_ids:
+            placeholders = ','.join(['?'] * len(sub_order_ids))
+            with sqlite3.connect(db_file) as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"SELECT sub_order_id FROM orders WHERE sub_order_id IN ({placeholders})", sub_order_ids)
+                existing_ids = {row[0] for row in cursor.fetchall()}
+
+            exclude_statuses = get_order_status_filter()['exclude_statuses']
+            if exclude_statuses:
+                mask_new_exclude = ~cleaned_df['子订单编号'].isin(existing_ids) & cleaned_df['订单状态'].isin(exclude_statuses)
+                before_count = len(cleaned_df)
+                cleaned_df = cleaned_df[~mask_new_exclude]
+                filtered_count = before_count - len(cleaned_df)
+                if filtered_count > 0:
+                    logger.info(f"已过滤 {filtered_count} 条新订单中的无效状态（订单状态: {', '.join(exclude_statuses)}）")
 
         to_push = get_pending_updates(db_file, cleaned_df)
 
