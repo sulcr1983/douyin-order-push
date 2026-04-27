@@ -320,7 +320,10 @@ def clean_data(df):
     df = df[[actual_columns[key] for key in actual_columns.keys()]].copy()
     df = df.rename(columns={v: k for k, v in actual_columns.items()})
 
-    df = df.map(lambda x: x.replace('\t', '') if isinstance(x, str) else x)
+    if hasattr(df, 'map'):
+        df = df.map(lambda x: x.replace('\t', '') if isinstance(x, str) else x)
+    else:
+        df = df.applymap(lambda x: x.replace('\t', '') if isinstance(x, str) else x)
 
     df['子订单编号'] = df['子订单编号'].astype(str).apply(clean_numeric_value)
     df['主订单编号'] = df['主订单编号'].astype(str).apply(clean_numeric_value)
@@ -373,6 +376,19 @@ def clean_data(df):
     return df
 
 
+def calc_outbound_status(row):
+    order_status = str(row.get('订单状态', '')).replace('\t', '').strip()
+    after_sales_status = str(row.get('售后状态', '')).replace('\t', '').strip()
+    shipping_time = str(row.get('发货时间', '')).replace('\t', '').strip()
+
+    if any(kw in order_status for kw in ["退款", "取消", "关闭"]) or "退款" in after_sales_status:
+        return "已关闭"
+    elif any(kw in order_status for kw in ["已发货", "已签收"]) or (shipping_time and shipping_time != 'nan' and shipping_time.strip()):
+        return "已出库"
+    else:
+        return "待出库"
+
+
 def get_pending_updates(db_file, df):
     to_push = []
     new_count = update_count = skip_count = 0
@@ -403,6 +419,9 @@ def get_pending_updates(db_file, df):
         sub_order_id = row['子订单编号']
         order_status = row['订单状态']
         shipping_time = row.get('发货时间', '')
+        current_merchant_income = round(float(row['商家收入金额']), 2)
+
+        outbound_status = calc_outbound_status(row)
 
         db_row = db_dict.get(sub_order_id)
 
@@ -411,17 +430,28 @@ def get_pending_updates(db_file, df):
             new_count += 1
         else:
             db_wecom_record_id = db_row[-1]
+            db_order_status = str(db_row[1])
+            db_merchant_income = round(float(db_row[7]), 2)
             current_values = (
                 order_status, row['主订单编号'], row['支付完成时间'], shipping_time,
-                row['选购商品'], row['商品数量'], row['商家收入金额'],
+                row['选购商品'], row['商品数量'], current_merchant_income,
                 row['省'], row['市'], row['区'], row['详细地址'], row['合并收货地址'],
                 row['提取后的快递信息'], row['商品ID']
             )
+            db_compare_values = (
+                db_order_status, db_row[2], db_row[3], db_row[4],
+                db_row[5], db_row[6], db_merchant_income,
+                db_row[9], db_row[10], db_row[11], db_row[12], db_row[13],
+                db_row[14], db_row[15]
+            )
+
+            db_status_has_close = any(kw in db_order_status for kw in ["退款", "取消", "关闭"])
+            force_update_refund = (outbound_status == "已关闭" and not db_status_has_close)
 
             if not db_wecom_record_id:
                 to_push.append({'action': 'add', 'data': row, 'record_id': None})
                 new_count += 1
-            elif current_values != db_row[1:-1]:
+            elif force_update_refund or current_values != db_compare_values:
                 to_push.append({'action': 'update', 'data': row, 'record_id': db_wecom_record_id})
                 update_count += 1
             else:
@@ -439,16 +469,7 @@ def send_data(webhook_url, db_file, item, index, total):
     logger.info(f"[{index+1}/{total}] 正在处理子订单: {row['子订单编号']}，动作: {action}")
 
     payment_time_timestamp = time_to_timestamp(row['支付完成时间'])
-    order_status = str(row.get('订单状态', '')).replace('\t', '').strip()
-    after_sales_status = str(row.get('售后状态', '')).replace('\t', '').strip()
-    shipping_time = str(row.get('发货时间', '')).replace('\t', '').strip()
-
-    if any(kw in order_status for kw in ["退款", "取消", "关闭"]) or "退款" in after_sales_status:
-        outbound_status = "已关闭"
-    elif any(kw in order_status for kw in ["已发货", "已签收"]) or (shipping_time and shipping_time != 'nan' and shipping_time.strip()):
-        outbound_status = "已出库"
-    else:
-        outbound_status = "待出库"
+    outbound_status = calc_outbound_status(row)
 
     try:
         quantity = int(row['商品数量']) if pd.notna(row['商品数量']) else 0
