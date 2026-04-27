@@ -14,7 +14,7 @@ LOG_FILE = os.getenv('LOG_FILE', 'sync_log.txt')
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 
 EXCLUDE_ORDER_STATUSES = [
-    status.strip() for status in os.getenv('EXCLUDE_ORDER_STATUSES', '已关闭,已取消,未付款,待付款,交易关闭,取消订单').split(',')
+    status.strip() for status in os.getenv('EXCLUDE_ORDER_STATUSES', '未付款,待付款').split(',')
     if status.strip()
 ]
 
@@ -300,7 +300,10 @@ def clean_data(df):
         '省': ['省', '省份'], '市': ['市', '城市'], '区': ['区', '区县'],
         '详细地址': ['详细地址', '地址'], '快递信息': ['快递信息', '物流信息', '快递'], '商品ID': ['商品ID', '商品id', '商品编码', '商家编码']
     }
-    optional_columns_map = {'发货时间': ['发货时间', '出库时间', 'shipping time', 'ship_time']}
+    optional_columns_map = {
+        '发货时间': ['发货时间', '出库时间', 'shipping time', 'ship_time'],
+        '售后状态': ['售后状态', '售后']
+    }
 
     actual_columns = {}
     for key, aliases in required_columns_map.items():
@@ -316,6 +319,8 @@ def clean_data(df):
 
     df = df[[actual_columns[key] for key in actual_columns.keys()]].copy()
     df = df.rename(columns={v: k for k, v in actual_columns.items()})
+
+    df = df.map(lambda x: x.replace('\t', '') if isinstance(x, str) else x)
 
     df['子订单编号'] = df['子订单编号'].astype(str).apply(clean_numeric_value)
     df['主订单编号'] = df['主订单编号'].astype(str).apply(clean_numeric_value)
@@ -434,12 +439,16 @@ def send_data(webhook_url, db_file, item, index, total):
     logger.info(f"[{index+1}/{total}] 正在处理子订单: {row['子订单编号']}，动作: {action}")
 
     payment_time_timestamp = time_to_timestamp(row['支付完成时间'])
-    shipping_time = row.get('发货时间', '')
-    order_status = str(row.get('订单状态', '')).strip()
-    outbound_keywords = ["已发货", "已签收"]
-    is_shipped_by_status = any(kw in order_status for kw in outbound_keywords)
-    is_shipped_by_time = bool(shipping_time and str(shipping_time).strip())
-    outbound_status = "已出库" if (is_shipped_by_status or is_shipped_by_time) else "待出库"
+    order_status = str(row.get('订单状态', '')).replace('\t', '').strip()
+    after_sales_status = str(row.get('售后状态', '')).replace('\t', '').strip()
+    shipping_time = str(row.get('发货时间', '')).replace('\t', '').strip()
+
+    if any(kw in order_status for kw in ["退款", "取消", "关闭"]) or "退款" in after_sales_status:
+        outbound_status = "已关闭"
+    elif any(kw in order_status for kw in ["已发货", "已签收"]) or (shipping_time and shipping_time != 'nan' and shipping_time.strip()):
+        outbound_status = "已出库"
+    else:
+        outbound_status = "待出库"
 
     try:
         quantity = int(row['商品数量']) if pd.notna(row['商品数量']) else 0
