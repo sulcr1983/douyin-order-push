@@ -433,16 +433,17 @@ def get_pending_updates(db_file, df):
             db_order_status = str(db_row[1])
             db_merchant_income = round(float(db_row[7]), 2)
             current_values = (
-                order_status, row['主订单编号'], row['支付完成时间'], shipping_time,
-                row['选购商品'], row['商品数量'], current_merchant_income,
-                row['省'], row['市'], row['区'], row['详细地址'], row['合并收货地址'],
-                row['提取后的快递信息'], row['商品ID']
+                str(order_status), str(row['主订单编号']), str(row['支付完成时间']), str(shipping_time),
+                str(row['选购商品']), int(row['商品数量']), current_merchant_income,
+                str(row['省']), str(row['市']), str(row['区']), str(row['详细地址']), str(row['合并收货地址']),
+                str(row['提取后的快递信息']), str(row['商品ID'])
             )
+
             db_compare_values = (
-                db_order_status, db_row[2], db_row[3], db_row[4],
-                db_row[5], db_row[6], db_merchant_income,
-                db_row[9], db_row[10], db_row[11], db_row[12], db_row[13],
-                db_row[14], db_row[15]
+                str(db_order_status), str(db_row[2]), str(db_row[3]), str(db_row[4]),
+                str(db_row[5]), int(db_row[6]), db_merchant_income,
+                str(db_row[8]), str(db_row[9]), str(db_row[10]), str(db_row[11]), str(db_row[12]),
+                str(db_row[13]), str(db_row[14])
             )
 
             db_status_has_close = any(kw in db_order_status for kw in ["退款", "取消", "关闭"])
