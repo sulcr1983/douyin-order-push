@@ -435,7 +435,11 @@ def send_data(webhook_url, db_file, item, index, total):
 
     payment_time_timestamp = time_to_timestamp(row['支付完成时间'])
     shipping_time = row.get('发货时间', '')
-    outbound_status = "已出库" if shipping_time else "待出库"
+    order_status = str(row.get('订单状态', '')).strip()
+    outbound_keywords = ["已发货", "已签收"]
+    is_shipped_by_status = any(kw in order_status for kw in outbound_keywords)
+    is_shipped_by_time = bool(shipping_time and str(shipping_time).strip())
+    outbound_status = "已出库" if (is_shipped_by_status or is_shipped_by_time) else "待出库"
 
     try:
         quantity = int(row['商品数量']) if pd.notna(row['商品数量']) else 0
