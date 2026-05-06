@@ -155,19 +155,19 @@ class OrderSyncApp:
             for shop in selected_shops:
                 self.root.after(0, self._append_log, f"━━━ 开始同步店铺: {shop} ━━━\n")
                 result = subprocess.run(
-                    [sys.executable, str(BASE_DIR / "main.py")],
+                    [sys.executable, str(BASE_DIR / "main.py"), f"--shops={shop}"],
                     capture_output=True,
                     text=True,
                     cwd=str(BASE_DIR),
-                    timeout=300
+                    timeout=600
                 )
                 output = result.stdout + result.stderr
                 self.root.after(0, self._append_log, output)
 
-                total = self._parse_number(output, '总处理订单数:')
-                pending = self._parse_number(output, '实际发生变动数:')
-                success = self._parse_number(output, '成功数:')
-                fail = self._parse_number(output, '失败数:')
+                total = self._parse_number(output, '总处理:')
+                pending = self._parse_number(output, '变动:')
+                success = self._parse_number(output, '成功:')
+                fail = self._parse_number(output, '失败:')
 
                 self.shop_results.append({
                     'shop': shop,

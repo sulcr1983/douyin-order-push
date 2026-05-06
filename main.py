@@ -2,6 +2,7 @@ import os
 import sys
 import re
 import time
+import argparse
 import sqlite3
 import logging
 import shutil
@@ -78,9 +79,10 @@ FIELD_MAPPING = {
 
 
 def setup_logging():
-    logger = logging.getLogger()
+    logger = logging.getLogger('order_sync')
     logger.handlers.clear()
     logger.setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+    logger.propagate = False
     formatter = logging.Formatter(
         '%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
@@ -108,7 +110,8 @@ def time_to_timestamp(time_str):
         if pd.isna(dt):
             raise ValueError(f"无法解析时间: {cleaned_time}")
         return str(int(dt.timestamp() * 1000))
-    except Exception:
+    except Exception as e:
+        logger.warning(f"时间解析失败 ({e})，使用当前时间替代: {time_str}")
         return str(int(datetime.now().timestamp() * 1000))
 
 
@@ -215,7 +218,7 @@ def insert_or_update_db(db_file, row, action, record_id=None, shop_name=''):
                 shipping_time = row.get('发货时间', '')
                 if action == 'add':
                     cursor.execute('''
-                    INSERT OR REPLACE INTO orders (
+                    INSERT OR IGNORE INTO orders (
                         sub_order_id, shop_name, order_status, main_order_id, payment_time,
                         shipping_time, product_name, quantity, merchant_income,
                         province, city, district, address, full_address, express_info,
@@ -229,12 +232,26 @@ def insert_or_update_db(db_file, row, action, record_id=None, shop_name=''):
                         row['合并收货地址'], row['提取后的快递信息'],
                         row['商品ID'], current_time, record_id
                     ))
+                    if cursor.rowcount == 0:
+                        cursor.execute('''UPDATE orders SET
+                            order_status=?, main_order_id=?, payment_time=?, shipping_time=?,
+                            product_name=?, quantity=?, merchant_income=?, province=?, city=?,
+                            district=?, address=?, full_address=?, express_info=?, product_id=?,
+                            last_sync_time=?, wecom_record_id=COALESCE(?, wecom_record_id)
+                            WHERE sub_order_id=? AND shop_name=?''',
+                            (row['订单状态'], row['主订单编号'], row['支付完成时间'],
+                             shipping_time, row['选购商品'], int(row['商品数量']),
+                             float(row['商家收入金额']), row['省'], row['市'], row['区'],
+                             row['详细地址'], row['合并收货地址'],
+                             row['提取后的快递信息'], row['商品ID'], current_time,
+                             record_id, row['子订单编号'], shop_name)
+                        )
                 elif action == 'update':
                     cursor.execute('''UPDATE orders SET
                         order_status=?, main_order_id=?, payment_time=?, shipping_time=?,
                         product_name=?, quantity=?, merchant_income=?, province=?, city=?,
                         district=?, address=?, full_address=?, express_info=?, product_id=?,
-                        last_sync_time=?, wecom_record_id=?
+                        last_sync_time=?, wecom_record_id=COALESCE(?, wecom_record_id)
                         WHERE sub_order_id=? AND shop_name=?''',
                         (row['订单状态'], row['主订单编号'], row['支付完成时间'],
                          shipping_time, row['选购商品'], int(row['商品数量']),
@@ -346,7 +363,7 @@ def health_check():
         print("  ⚠ 所有店铺文件夹中均未检测到订单文件")
         any_error = True
     print(f"  [5/5] Python依赖检测:")
-    for dep in ['pandas', 'requests', 'dotenv', 'openpyxl']:
+    for dep in ['pandas', 'requests', 'dotenv', 'openpyxl', 'xlrd']:
         try:
             __import__(dep)
             print(f"    {dep.ljust(nw)}✓")
@@ -536,7 +553,6 @@ def sync_shop(shop_name, config):
     try:
         logger.info(f"正在读取文件: {file_path}")
         init_db(db_file)
-        migrate_old_dbs(db_file, SHOP_NAMES)
         cleaned_df = clean_data(read_file(file_path, file_ext))
         if cleaned_df.empty:
             logger.warning(f"清洗后没有有效订单数据")
@@ -580,7 +596,15 @@ def sync_shop(shop_name, config):
         logger.error(f"\n错误: {e}")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='订单同步系统')
+    parser.add_argument('--shops', type=str, default='',
+                        help='指定要同步的店铺，逗号分隔，默认同步所有店铺')
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     start = time.time()
     logger.info("=" * 50)
     logger.info("订单同步系统启动")
@@ -588,7 +612,20 @@ def main():
     if not health_check():
         logger.error("健康检查未通过，同步终止")
         return
-    for name, cfg in SHOP_CONFIGS.items():
+
+    migrate_old_dbs(UNIFIED_DB, SHOP_CONFIGS)
+
+    if args.shops:
+        selected = [s.strip() for s in args.shops.split(',') if s.strip()]
+        shop_configs = {k: v for k, v in SHOP_CONFIGS.items() if k in selected}
+        if not shop_configs:
+            logger.error(f"未找到指定店铺: {args.shops}，可用店铺: {list(SHOP_CONFIGS.keys())}")
+            return
+        logger.info(f"仅同步指定店铺: {list(shop_configs.keys())}")
+    else:
+        shop_configs = SHOP_CONFIGS
+
+    for name, cfg in shop_configs.items():
         sync_shop(name, cfg)
     logger.info(f"\n{'='*50}\n所有店铺同步完成！总耗时: {time.time() - start:.2f} 秒\n{'='*50}")
 

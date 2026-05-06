@@ -1,28 +1,28 @@
 @echo off
 cd /d "%~dp0"
 
-title ¶©µ¥Í¬²½ÏµÍ³ - Nuitka ´ò°ü½Å±¾
+title è®¢å•åŒæ­¥ç³»ç»Ÿ - Nuitka æ‰“åŒ…è„šæœ¬
 
 echo ========================================
-echo  ¶©µ¥Í¬²½ÏµÍ³ - Nuitka ´ò°ü
+echo  è®¢å•åŒæ­¥ç³»ç»Ÿ - Nuitka æ‰“åŒ…
 echo ========================================
 echo.
 
 where nuitka >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [1/2] Nuitka Î´¼ì²âµ½£¬ÕıÔÚ°²×°...
+    echo [1/2] Nuitka æœªæ£€æµ‹åˆ°ï¼Œæ­£åœ¨å®‰è£…...
     pip install nuitka
     if %errorlevel% neq 0 (
-        echo [´íÎó] Nuitka °²×°Ê§°Ü
+        echo [é”™è¯¯] Nuitka å®‰è£…å¤±è´¥
         pause
         exit /b 1
     )
-    echo [1/2] Nuitka °²×°Íê³É
+    echo [1/2] Nuitka å®‰è£…å®Œæˆ
 )
 
-echo [2/2] ÕıÔÚ±àÒëÎªµ¥ÎÄ¼ş EXE£¨Ê×´Î±àÒëĞèÒª 3-5 ·ÖÖÓ£©...
+echo [2/2] æ­£åœ¨ç¼–è¯‘ä¸ºå•æ–‡ä»¶ EXEï¼ˆé¦–æ¬¡ç¼–è¯‘éœ€è¦ 3-5 åˆ†é’Ÿï¼‰...
 echo.
-echo ±àÒëÍê³Éºó½«ÔÚ dist/ Ä¿Â¼Éú³É ¶©µ¥Í¬²½ÏµÍ³.exe
+echo ç¼–è¯‘å®Œæˆååœ¨ dist/ ç›®å½•ä¸‹æ‰¾åˆ° è®¢å•åŒæ­¥ç³»ç»Ÿ.exe
 echo.
 
 pip install ordered-set zstandard >nul 2>&1
@@ -33,10 +33,10 @@ nuitka ^
     --enable-plugin=tk-inter ^
     --windows-console-mode=attach ^
     --output-dir=dist ^
-    --output-name=¶©µ¥Í¬²½ÏµÍ³.exe ^
+    --output-name=è®¢å•åŒæ­¥ç³»ç»Ÿ.exe ^
     --file-version=3.0.0 ^
     --product-version=3.0.0 ^
-    --file-description="¶©µ¥Í¬²½ÏµÍ³" ^
+    --file-description="è®¢å•åŒæ­¥ç³»ç»Ÿ" ^
     --copyright="sulcr@qq.com" ^
     --remove-output ^
     main.py
@@ -44,16 +44,14 @@ nuitka ^
 echo.
 if %errorlevel% equ 0 (
     echo ========================================
-    echo  ´ò°ü³É¹¦£¡
-    echo  Êä³öÎÄ¼ş: dist\¶©µ¥Í¬²½ÏµÍ³.exe
-    echo  ÎÄ¼ş´óĞ¡: 
-    dir /-C "dist\¶©µ¥Í¬²½ÏµÍ³.exe" | findstr "¶©µ¥Í¬²½ÏµÍ³.exe"
+    echo  æ‰“åŒ…æˆåŠŸï¼
+    echo  è¾“å‡ºæ–‡ä»¶: dist\è®¢å•åŒæ­¥ç³»ç»Ÿ.exe
     echo.
-    echo  Ê¹ÓÃ·½·¨£º½« .env ºÍ ¶©µ¥ÎÄ¼ş ·ÅÔÚ exe Í¬Ä¿Â¼ÏÂ
-    echo  Ë«»÷ ¶©µ¥Í¬²½ÏµÍ³.exe ¼´¿ÉÔËĞĞ
+    echo  ä½¿ç”¨æ–¹æ³•ï¼šå°† .env å’Œåº—é“ºæ–‡ä»¶å¤¹ä¸ exe åŒç›®å½•æ”¾ç½®
+    echo  åŒå‡» è®¢å•åŒæ­¥ç³»ç»Ÿ.exe å³å¯è¿è¡Œ
     echo ========================================
 ) else (
-    echo [´íÎó] ´ò°üÊ§°Ü£¬Çë²é¿´ÉÏ·½´íÎóĞÅÏ¢
+    echo [é”™è¯¯] ç¼–è¯‘å¤±è´¥ï¼Œè¯·æŸ¥çœ‹ä¸Šæ–¹é”™è¯¯ä¿¡æ¯
 )
 
 pause
