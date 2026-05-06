@@ -54,18 +54,16 @@ WECOM_WEBHOOK_URL_TIANYIXINXUAN=https://qyapi.weixin.qq.com/cgi-bin/wedoc/smarts
 
 ```
 ordersync/
-├── main.py                 # 入口文件
-├── 订单同步工具.pyw          # GUI 入口
+├── main.py                 # 主程序（全部核心逻辑）
+├── 订单同步工具.pyw          # GUI 图形界面
 ├── 运行订单同步.bat          # 启动脚本（自动安装依赖）
+├── install.bat              # 一键部署脚本
+├── build_exe.bat            # Nuitka 打包脚本
 ├── requirements.txt        # Python 依赖
 ├── .env.example            # 配置模板（首次使用需复制为 .env）
-├── system/                 # 核心逻辑（勿手动修改）
-│   ├── config.py           # 配置加载
-│   ├── sync_engine.py      # 同步引擎
-│   ├── db.py               # 数据库操作
-│   └── utils.py            # 工具函数
 ├── Qmaster/                # Qmaster 店铺订单文件夹
-└── tianyixinxuan/          # 天颐心选店铺订单文件夹
+├── tianyixinxuan/          # 天颐心选店铺订单文件夹
+└── logs/                   # 同步报告（自动生成）
 ```
 
 ## 常见问题
