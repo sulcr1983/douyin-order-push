@@ -90,4 +90,4 @@ ordersync/
 
 ## 技术支持
 
-如遇问题，请联系 <sulcr@qq.com>
+如遇问题，请联系 苏哥<sulcr@qq.com>

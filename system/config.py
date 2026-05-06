@@ -20,27 +20,33 @@ EXCLUDE_ORDER_STATUSES = [
 
 MAX_CONSECUTIVE_FAILURES = int(os.getenv('MAX_CONSECUTIVE_FAILURES', '10'))
 
-WEBHOOK_URLS = {
-    'Qmaster': os.getenv('WECOM_WEBHOOK_URL_QMASTER', ''),
-    'tianyixinxuan': os.getenv('WECOM_WEBHOOK_URL_TIANYIXINXUAN', '')
-}
+UNIFIED_DB = os.getenv('UNIFIED_DB', str(BASE_DIR / 'orders.db'))
 
-DB_FILES = {
-    'Qmaster': os.getenv('DB_FILE_QMASTER', str(BASE_DIR / 'orders_qmaster.db')),
-    'tianyixinxuan': os.getenv('DB_FILE_TIANYIXINXUAN', str(BASE_DIR / 'orders_tianyixinxuan.db'))
-}
+SHOP_NAMES = [
+    s.strip() for s in os.getenv('SHOP_NAMES', 'Qmaster,tianyixinxuan').split(',')
+    if s.strip()
+]
 
-SHOP_CONFIGS = {
-    'Qmaster': {
-        'folder': str(BASE_DIR / 'Qmaster'),
-        'db': DB_FILES['Qmaster'],
-        'webhook': WEBHOOK_URLS['Qmaster']
-    },
-    'tianyixinxuan': {
-        'folder': str(BASE_DIR / 'tianyixinxuan'),
-        'db': DB_FILES['tianyixinxuan'],
-        'webhook': WEBHOOK_URLS['tianyixinxuan']
+SHOP_CONFIGS = {}
+for name in SHOP_NAMES:
+    key = name.upper()
+    SHOP_CONFIGS[name] = {
+        'folder': str(BASE_DIR / name),
+        'db': UNIFIED_DB,
+        'webhook': os.getenv(f'WECOM_WEBHOOK_URL_{key}', '')
     }
+
+FIELD_MAPPING = {
+    'sub_order_id': os.getenv('FIELD_SUB_ORDER_ID', 'fxNwEq'),
+    'product_id': os.getenv('FIELD_PRODUCT_ID', 'fCNsiv'),
+    'product_name': os.getenv('FIELD_PRODUCT_NAME', 'fBK7XT'),
+    'quantity': os.getenv('FIELD_QUANTITY', 'fy3AU0'),
+    'merchant_income': os.getenv('FIELD_MERCHANT_INCOME', 'ff2OiF'),
+    'order_status': os.getenv('FIELD_ORDER_STATUS', 'fJ0NdH'),
+    'payment_time': os.getenv('FIELD_PAYMENT_TIME', 'fNuVBy'),
+    'address': os.getenv('FIELD_ADDRESS', 'fWJEK9'),
+    'express_info': os.getenv('FIELD_EXPRESS_INFO', 'fTMuqw'),
+    'outbound_status': os.getenv('FIELD_OUTBOUND_STATUS', 'fzFeek'),
 }
 
 

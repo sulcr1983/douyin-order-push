@@ -3,6 +3,7 @@
 *.db
 *.db-journal
 sync_log.txt
+logs/
 
 # 店铺数据文件（保留文件夹结构）
 Qmaster/*.csv

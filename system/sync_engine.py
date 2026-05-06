@@ -8,14 +8,95 @@ from pathlib import Path
 import pandas as pd
 import requests
 
-from .config import setup_logging, SHOP_CONFIGS, MAX_CONSECUTIVE_FAILURES
-from .db import init_db, insert_or_update_db, get_pending_updates
+from .config import (
+    setup_logging, SHOP_CONFIGS, SHOP_NAMES, MAX_CONSECUTIVE_FAILURES,
+    FIELD_MAPPING, BASE_DIR
+)
+from .db import init_db, insert_or_update_db, get_pending_updates, migrate_old_dbs
 from .utils import (
     time_to_timestamp, get_column_with_alias, clean_numeric_value,
     get_order_status_filter, calc_outbound_status
 )
 
 logger = setup_logging()
+
+
+def health_check():
+    any_error = False
+    print("=" * 50)
+    print("  系统健康检查")
+    print("=" * 50)
+
+    print(f"  [1/5] Python版本: {__import__('sys').version.split()[0]} ", end='')
+    py_ok = True
+    print("✓" if py_ok else "✗")
+
+    env_file = Path(BASE_DIR) / '.env'
+    print(f"  [2/5] .env配置文件: ", end='')
+    if env_file.exists():
+        print("✓")
+    else:
+        print("✗ (缺失，请复制 .env.example 为 .env)")
+        any_error = True
+
+    print(f"  [3/5] 店铺配置检测 ({len(SHOP_NAMES)} 个店铺):")
+    name_width = max((len(n) for n in SHOP_NAMES), default=8) + 2
+    for name in SHOP_NAMES:
+        config = SHOP_CONFIGS.get(name, {})
+        webhook = config.get('webhook', '')
+        folder_path = Path(config.get('folder', ''))
+        webhook_ok = bool(webhook and webhook.strip())
+        folder_ok = folder_path.exists()
+
+        status_icon = "✓" if (webhook_ok and folder_ok) else "⚠"
+        webhook_status = "已配置" if webhook_ok else "未配置"
+        folder_status = "存在" if folder_ok else "不存在"
+        print(f"    {name.ljust(name_width)}Webhook: {webhook_status}, 文件夹: {folder_status} {status_icon}")
+        if not webhook_ok or not folder_ok:
+            any_error = True
+
+    has_files = False
+    print(f"  [4/5] 订单文件检测:")
+    for name in SHOP_NAMES:
+        folder = SHOP_CONFIGS.get(name, {}).get('folder', '')
+        folder_path = Path(folder)
+        if folder_path.exists():
+            files = [f for f in folder_path.iterdir() if f.is_file() and f.suffix.lower() in ['.csv', '.xlsx', '.xls']]
+            if files:
+                has_files = True
+                latest = max(files, key=lambda f: f.stat().st_mtime)
+                print(f"    {name.ljust(name_width)}最新文件: {latest.name}")
+            else:
+                print(f"    {name.ljust(name_width)}无订单文件")
+
+    if not has_files:
+        print("  ⚠ 所有店铺文件夹中均未检测到订单文件，请放入 CSV/Excel 文件后重试")
+        any_error = True
+
+    print(f"  [5/5] Python依赖检测:")
+    deps = [
+        ('pandas', 'pd'), ('requests', 'requests'), ('dotenv', 'dotenv'),
+        ('openpyxl', 'openpyxl')
+    ]
+    dep_ok = True
+    for dep_name, dep_import in deps:
+        try:
+            __import__(dep_import)
+            print(f"    {dep_name.ljust(name_width)}✓")
+        except ImportError:
+            print(f"    {dep_name.ljust(name_width)}✗ (未安装)")
+            dep_ok = False
+            any_error = True
+
+    print("=" * 50)
+    if any_error:
+        print("  健康检查完成：存在未通过项，请根据提示修复")
+        print("=" * 50)
+        return False
+    else:
+        print("  健康检查完成：全部通过，准备开始同步")
+        print("=" * 50)
+        return True
 
 
 def get_latest_file(folder_path, extensions=None):
@@ -198,7 +279,7 @@ def clean_data(df):
     return df
 
 
-def send_data(webhook_url, db_file, item, index, total):
+def send_data(webhook_url, db_file, item, index, total, shop_name):
     row = item['data']
     action = item['action']
     record_id = item['record_id']
@@ -222,27 +303,28 @@ def send_data(webhook_url, db_file, item, index, total):
         )
         return False
 
+    fm = FIELD_MAPPING
     values = {
-        "fxNwEq": str(row['子订单编号']),
-        "fCNsiv": str(row['商品ID']),
-        "fBK7XT": str(row['选购商品']),
-        "fy3AU0": quantity,
-        "ff2OiF": merchant_income,
-        "fJ0NdH": [{"text": str(row['订单状态'])}],
-        "fNuVBy": payment_time_timestamp,
-        "fWJEK9": str(row['合并收货地址']),
-        "fTMuqw": str(row['提取后的快递信息']),
-        "fzFeek": [{"text": outbound_status}]
+        fm['sub_order_id']: str(row['子订单编号']),
+        fm['product_id']: str(row['商品ID']),
+        fm['product_name']: str(row['选购商品']),
+        fm['quantity']: quantity,
+        fm['merchant_income']: merchant_income,
+        fm['order_status']: [{"text": str(row['订单状态'])}],
+        fm['payment_time']: payment_time_timestamp,
+        fm['address']: str(row['合并收货地址']),
+        fm['express_info']: str(row['提取后的快递信息']),
+        fm['outbound_status']: [{"text": outbound_status}]
     }
 
     if action == 'add':
         payload = {
             "schema": {
-                "fxNwEq": "子订单编号", "fCNsiv": "商品ID",
-                "fBK7XT": "商品名称", "fy3AU0": "下单数量",
-                "ff2OiF": "商家收入金额", "fJ0NdH": "订单状态",
-                "fNuVBy": "下单时间", "fWJEK9": "收货地址",
-                "fTMuqw": "快递信息", "fzFeek": "出库状态"
+                fm['sub_order_id']: "子订单编号", fm['product_id']: "商品ID",
+                fm['product_name']: "商品名称", fm['quantity']: "下单数量",
+                fm['merchant_income']: "商家收入金额", fm['order_status']: "订单状态",
+                fm['payment_time']: "下单时间", fm['address']: "收货地址",
+                fm['express_info']: "快递信息", fm['outbound_status']: "出库状态"
             },
             "add_records": [{"values": values}]
         }
@@ -284,7 +366,7 @@ def send_data(webhook_url, db_file, item, index, total):
                 )
                 db_record_id = new_record_id if new_record_id else record_id
 
-                if insert_or_update_db(db_file, row, db_action, db_record_id):
+                if insert_or_update_db(db_file, row, db_action, db_record_id, shop_name):
                     logger.info(f"[{index+1}/{total}] ✓ 本地数据库已更新")
                 else:
                     logger.warning(
@@ -349,6 +431,7 @@ def sync_shop(shop_name, config):
     try:
         logger.info(f"正在读取文件: {file_path}")
         init_db(db_file)
+        migrate_old_dbs(db_file, SHOP_NAMES)
         df = read_file(file_path, file_ext)
         cleaned_df = clean_data(df)
 
@@ -362,8 +445,8 @@ def sync_shop(shop_name, config):
             with sqlite3.connect(db_file) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    f"SELECT sub_order_id FROM orders WHERE sub_order_id IN ({placeholders})",
-                    sub_order_ids
+                    f"SELECT sub_order_id FROM orders WHERE sub_order_id IN ({placeholders}) AND shop_name = ?",
+                    sub_order_ids + [shop_name]
                 )
                 existing_ids = {row[0] for row in cursor.fetchall()}
 
@@ -382,7 +465,7 @@ def sync_shop(shop_name, config):
                         f"（订单状态: {', '.join(exclude_statuses)}）"
                     )
 
-        to_push = get_pending_updates(db_file, cleaned_df)
+        to_push = get_pending_updates(db_file, cleaned_df, shop_name)
 
         if not to_push:
             logger.info("没有需要同步的订单数据")
@@ -394,7 +477,7 @@ def sync_shop(shop_name, config):
         consecutive_failures = 0
 
         for index, item in enumerate(to_push):
-            if send_data(webhook_url, db_file, item, index, total):
+            if send_data(webhook_url, db_file, item, index, total, shop_name):
                 success_count += 1
                 consecutive_failures = 0
             else:
@@ -431,6 +514,10 @@ def main():
     logger.info("=" * 50)
     logger.info("订单同步系统启动")
     logger.info("=" * 50)
+
+    if not health_check():
+        logger.error("健康检查未通过，同步终止")
+        return
 
     for shop_name, config in SHOP_CONFIGS.items():
         sync_shop(shop_name, config)
