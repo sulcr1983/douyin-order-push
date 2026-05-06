@@ -1,114 +1,93 @@
-# 订单同步系统使用说明
+# 订单同步系统
 
-## 系统功能
+> 告别手动复制粘贴订单 — 把 CSV 往文件夹一丢，一键同步到企业微信智能表格
 
-- 支持多店铺订单同步，多个店铺就多个文件夹，只需要把订单导出的表格放入不同的表格，点运行就自动进入到企业微信/钉钉/飞书/erp等系统里面，需要自己拿webhook和示例修改。
-- 自动读取 CSV 和 Excel 订单文件
-- 清洗和处理订单数据
-- 同步数据到企业微信智能表格
-- 自动记录和更新订单状态
+## 它解决了什么痛苦？
 
-## 快速开始
+每次从电商平台导出订单后，还得手动复制粘贴到企业微信表格里，订单多了容易漏、容易错、还费时间。这个工具让你只需要：**把文件丢进文件夹 → 点一下按钮 → 全自动同步**。
 
-1. 在企业微信-智能表格/飞书/钉钉创建智能/多维表格
-2. 通过右上角三横-接收外部数据，把 webhook 地址和示例数据都提交给 Python，让 Python 匹配清洗原来的订单和需要同步到订单即可
-3. 在项目文件夹下创建两个店铺文件夹：
-   - **Qmaster** - 存放 Qmaster 店铺的订单文件
-   - **tianyixinxuan** - 存放天颐心选店铺的订单文件
+## 3 个典型场景
 
-### 方法一：双击运行（推荐）
+1. **每日订单录入**：从店铺后台导出 CSV，丢进对应文件夹，双击运行，几百条订单 2 分钟全部同步到企业微信表格
+2. **订单状态更新**：买家退款/发货后重新导出文件，工具自动识别变化，只更新有变动的订单，不重复不遗漏
+3. **多店铺管理**：Qmaster 和天颐心选各一个文件夹，一次运行全部同步，互不干扰
 
-1. 找到并双击 `运行订单同步.bat` 文件
-2. 系统会自动执行同步操作
-3. 操作完成后会显示结果，按任意键关闭窗口
+## 极简使用（3 步）
 
-### 方法二：手动运行
-
-1. 打开命令提示符（CMD）
-2. 切换到脚本所在目录
-3. 执行命令：`python main.py`
+1. **配置**：复制 `.env.example` 为 `.env`，填入你的 Webhook 地址
+2. **放文件**：把订单 CSV/Excel 丢进对应店铺文件夹（Qmaster / tianyixinxuan）
+3. **运行**：双击 `运行订单同步.bat` 或 `订单同步工具.pyw`
 
 ## 配置说明
 
-### 1. 配置文件（.env）
+### 首次使用
 
-用记事本打开 `.env` 文件，修改以下配置：
+1. 复制 `.env.example` 为 `.env`
+2. 用记事本打开 `.env`，填入各店铺的 Webhook URL
 
 ```env
-# Qmaster 店铺配置
-WECOM_WEBHOOK_URL_QMASTER=https://qyapi.weixin.qq.com/cgi-bin/wedoc/smartsheet/webhook?key=你的Qmaster店铺Webhook密钥
-DB_FILE_QMASTER=orders_qmaster.db
-
-# 天颐心选店铺配置
-WECOM_WEBHOOK_URL_TIANYIXINXUAN=https://qyapi.weixin.qq.com/cgi-bin/wedoc/smartsheet/webhook?key=你的天颐心选店铺Webhook密钥
-DB_FILE_TIANYIXINXUAN=orders_tianyixinxuan.db
+WECOM_WEBHOOK_URL_QMASTER=https://qyapi.weixin.qq.com/cgi-bin/wedoc/smartsheet/webhook?key=你的密钥
+WECOM_WEBHOOK_URL_TIANYIXINXUAN=https://qyapi.weixin.qq.com/cgi-bin/wedoc/smartsheet/webhook?key=你的密钥
 ```
 
-### 2. 订单文件
+### Webhook 获取方式
 
-- 将订单 CSV 或 Excel 文件放入对应的店铺文件夹
-- Qmaster 店铺订单放入 `Qmaster` 文件夹
-- 天颐心选店铺订单放入 `tianyixinxuan` 文件夹
-- 系统会自动识别最新的文件
-- 支持的文件格式：CSV、Excel（.xlsx、.xls）
-- 支持的编码格式：utf-8-sig、gbk
+1. 在企业微信智能表格中，点击右上角「⋯」→「接收外部数据」
+2. 获取 Webhook 地址和示例数据格式
+3. 将 Webhook 地址填入 `.env` 文件
+
+### 订单文件
+
+- 放入对应店铺文件夹即可，系统自动识别最新文件
+- 支持格式：CSV、Excel（.xlsx、.xls）
+- 支持编码：utf-8-sig、gbk
+
+## 运行方式
+
+| 方式 | 操作 | 适用场景 |
+|------|------|---------|
+| 双击 BAT | 运行 `运行订单同步.bat` | 命令行模式，自动安装依赖 |
+| 双击 PYW | 运行 `订单同步工具.pyw` | 图形界面模式，有日志窗口 |
+| 手动命令 | `python main.py` | 开发调试 |
+
+## 项目结构
+
+```
+ordersync/
+├── main.py                 # 入口文件
+├── 订单同步工具.pyw          # GUI 入口
+├── 运行订单同步.bat          # 启动脚本（自动安装依赖）
+├── requirements.txt        # Python 依赖
+├── .env.example            # 配置模板（首次使用需复制为 .env）
+├── system/                 # 核心逻辑（勿手动修改）
+│   ├── config.py           # 配置加载
+│   ├── sync_engine.py      # 同步引擎
+│   ├── db.py               # 数据库操作
+│   └── utils.py            # 工具函数
+├── Qmaster/                # Qmaster 店铺订单文件夹
+└── tianyixinxuan/          # 天颐心选店铺订单文件夹
+```
 
 ## 常见问题
 
-### 问题1：双击批处理文件没有反应
+**双击没反应？**
+→ 检查是否安装了 Python 并添加到环境变量
 
-- 检查是否已安装 Python
-- 检查 Python 是否添加到系统环境变量
-- 检查 `.env` 文件配置是否正确
+**提示依赖安装失败？**
+→ 检查网络连接，或手动执行 `pip install -r requirements.txt`
 
-### 问题2：运行时出现错误
+**企业微信没收到数据？**
+→ 检查 `.env` 中的 Webhook URL 是否正确
 
-- 查看命令窗口中的错误信息
-- 检查 CSV/Excel 文件格式是否正确
-- 检查网络连接是否正常
-- 确认文件列名是否符合要求
+**文件读取报错？**
+→ 关闭 Excel 后重试（文件可能被占用）
 
-### 问题3：企业微信没有收到数据
+## 商业价值
 
-- 检查 Webhook URL 是否正确
-- 检查网络连接是否正常
-- 查看命令窗口中的错误信息
-
-## 示例数据
-
-```json
-{
-  "schema": {
-    "fxNwEq": "子订单编号",
-    "fCNsiv": "商品ID",
-    "fBK7XT": "商品名称",
-    "fy3AU0": "下单数量",
-    "ff2OiF": "商家收入金额",
-    "fJ0NdH": "订单状态",
-    "fNuVBy": "下单时间",
-    "fWJEK9": "收货地址",
-    "fTMuqw": "快递信息",
-    "fzFeek": "出库状态"
-  },
-  "add_records": [
-    {
-      "values": {
-        "fxNwEq": "测试文本",
-        "fCNsiv": "测试文本",
-        "fBK7XT": "测试文本",
-        "fy3AU0": 1,
-        "ff2OiF": 10,
-        "fJ0NdH": [{"text": "待发货"}],
-        "fNuVBy": "1735660800000",
-        "fWJEK9": "测试文本",
-        "fTMuqw": "测试文本",
-        "fzFeek": [{"text": "待出库"}]
-      }
-    }
-  ]
-}
-```
+- 每日节省 30+ 分钟手动录入时间
+- 消除人工复制粘贴导致的错漏风险
+- 多店铺统一管理，扩展新店铺只需加一个文件夹和一行配置
 
 ## 技术支持
 
-如遇问题，请联系系统管理员 <sulcr@qq.com>。
+如遇问题，请联系 <sulcr@qq.com>

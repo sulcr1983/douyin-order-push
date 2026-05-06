@@ -1,10 +1,43 @@
-@echo on
-
-REM åˆ‡æ¢åˆ°å½“å‰ç›®å½•
+@echo off
 cd /d "%~dp0"
 
-REM è¿è¡ŒPythonè„šæœ¬
+where python >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [´íÎó] Î´¼ì²âµ½ Python
+    echo ÇëÏÈ°²×° Python 3.10 »ò¸ü¸ß°æ±¾
+    echo ÏÂÔØµØÖ·: https://www.python.org/downloads/
+    echo.
+    echo °²×°Ê±Çë¹´Ñ¡ "Add Python to PATH"
+    pause
+    exit /b 1
+)
+
+echo ========================================
+echo  ¶©µ¥Í¬²½ÏµÍ³ - Æô¶¯Æ÷
+echo ========================================
+echo.
+
+echo [1/3] ÕıÔÚ¼ì²éÒÀÀµ»·¾³...
+pip list 2>nul | findstr /C:"pandas" >nul
+if %errorlevel% neq 0 (
+    echo [2/3] ÕıÔÚ°²×°ÒÀÀµ£¨Ê×´ÎÔËĞĞĞèÒª1-2·ÖÖÓ£©...
+    pip install -r requirements.txt
+    if %errorlevel% neq 0 (
+        echo [´íÎó] ÒÀÀµ°²×°Ê§°Ü£¬Çë¼ì²éÍøÂçÁ¬½Ó
+        pause
+        exit /b 1
+    )
+    echo [2/3] ÒÀÀµ°²×°Íê³É
+) else (
+    echo [2/3] ÒÀÀµÒÑ¾ÍĞ÷
+)
+
+echo [3/3] ÕıÔÚÖ´ĞĞ¶©µ¥Í¬²½...
+echo.
 python main.py
 
-REM æ‰§è¡Œå®Œæˆåæš‚åœï¼Œä»¥ä¾¿æŸ¥çœ‹ç»“æœ
+echo.
+echo ========================================
+echo  Í¬²½Íê³É£¡°´ÈÎÒâ¼üÍË³ö
+echo ========================================
 pause
