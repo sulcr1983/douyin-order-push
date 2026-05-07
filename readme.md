@@ -4,7 +4,7 @@
 
 ## 它解决了什么痛苦？
 
-每次从电商平台导出订单后，还得手动复制粘贴到企业微信表格里，订单多了容易漏、容易错、还费时间。这个工具让你只需要：**把文件丢进文件夹 → 点一下按钮 → 全自动同步**。
+每次从电商平台导出订单后，还得手动复制粘贴到企业微信表格里，订单多了容易漏、容易错、还费时间。这个工具让你只需要：**把文件丢进文件夹 → 双击运行 → 全自动同步**。
 
 ## 3 个典型场景
 
@@ -12,13 +12,16 @@
 2. **订单状态更新**：买家退款/发货后重新导出文件，工具自动识别变化，只更新有变动的订单，不重复不遗漏
 3. **多店铺管理**：Qmaster 和天颐心选各一个文件夹，一次运行全部同步，互不干扰
 
-## 极简使用（3 步）
+## 运行方式
 
-1. **配置**：复制 `.env.example` 为 `.env`，填入你的 Webhook 地址
-2. **放文件**：把订单 CSV/Excel 丢进对应店铺文件夹（Qmaster / tianyixinxuan）
-3. **运行**：双击 `运行订单同步.bat` 或 `订单同步工具.pyw`
+| 方式 | 操作 | 适用场景 |
+|------|------|---------|
+| 双击 BAT | 运行 `运行订单同步.bat` | 命令行模式，自动安装依赖 |
+| 双击 PYW | 运行 `订单同步工具.pyw` | 图形界面模式，有日志窗口 |
+| 手动命令 | `python main.py` | 开发调试 |
+| 便携包 | 解压后双击 `启动订单同步.bat` | **无需安装 Python，给其他人用** |
 
-## 配置说明
+## 使用步骤
 
 ### 首次使用
 
@@ -29,6 +32,9 @@
 WECOM_WEBHOOK_URL_QMASTER=https://qyapi.weixin.qq.com/cgi-bin/wedoc/smartsheet/webhook?key=你的密钥
 WECOM_WEBHOOK_URL_TIANYIXINXUAN=https://qyapi.weixin.qq.com/cgi-bin/wedoc/smartsheet/webhook?key=你的密钥
 ```
+
+3. 把订单 CSV/Excel 丢进对应店铺文件夹（`Qmaster/` / `tianyixinxuan/`）
+4. 双击 `运行订单同步.bat` 或 `python main.py`
 
 ### Webhook 获取方式
 
@@ -42,13 +48,36 @@ WECOM_WEBHOOK_URL_TIANYIXINXUAN=https://qyapi.weixin.qq.com/cgi-bin/wedoc/smarts
 - 支持格式：CSV、Excel（.xlsx、.xls）
 - 支持编码：utf-8-sig、gbk
 
-## 运行方式
+## 字段映射
 
-| 方式 | 操作 | 适用场景 |
-|------|------|---------|
-| 双击 BAT | 运行 `运行订单同步.bat` | 命令行模式，自动安装依赖 |
-| 双击 PYW | 运行 `订单同步工具.pyw` | 图形界面模式，有日志窗口 |
-| 手动命令 | `python main.py` | 开发调试 |
+企业微信表格字段 ID 配置在 `.env` 中，如果表格重建导致 ID 变化，在这里修改：
+
+| 配置项 | 字段 ID | 说明 |
+|--------|---------|------|
+| `FIELD_SUB_ORDER_ID` | fxNwEq | 子订单编号 |
+| `FIELD_PRODUCT_ID` | fCNsiv | 商品ID |
+| `FIELD_PRODUCT_NAME` | fBK7XT | 商品名称 |
+| `FIELD_QUANTITY` | fy3AU0 | 下单数量 |
+| `FIELD_MERCHANT_INCOME` | ff2OiF | 商家收入金额 |
+| `FIELD_ORDER_STATUS` | fJ0NdH | 订单状态 |
+| `FIELD_PAYMENT_TIME` | fNuVBy | 下单时间 |
+| `FIELD_ADDRESS` | fWJEK9 | 收货地址 |
+| `FIELD_EXPRESS_INFO` | fTMuqw | 快递信息 |
+| `FIELD_OUTBOUND_STATUS` | fzFeek | 出库状态 |
+
+## 打包分发
+
+给其他人使用时（对方不需要安装 Python），可以用 Nuitka 或嵌入式 Python 打包：
+
+```bash
+# Nuitka 目录模式（需安装 Nuitka + C 编译器）
+nuitka --standalone --enable-plugin=tk-inter --output-dir=dist main.py
+
+# 或用打包好的便携版（Python 嵌入式，零报毒）
+# 见 portable/ 目录下的打包脚本
+```
+
+便携版解压后约 80MB，压缩包约 30MB，解压即可运行，不需要安装任何环境。
 
 ## 项目结构
 
@@ -60,16 +89,17 @@ ordersync/
 ├── install.bat              # 一键部署脚本
 ├── build_exe.bat            # Nuitka 打包脚本
 ├── requirements.txt        # Python 依赖
-├── .env.example            # 配置模板（首次使用需复制为 .env）
+├── .env / .env.example     # 配置文件 / 配置模板
 ├── Qmaster/                # Qmaster 店铺订单文件夹
 ├── tianyixinxuan/          # 天颐心选店铺订单文件夹
+├── portable/               # 便携打包输出目录
 └── logs/                   # 同步报告（自动生成）
 ```
 
 ## 常见问题
 
 **双击没反应？**
-→ 检查是否安装了 Python 并添加到环境变量
+→ 检查是否安装了 Python 并添加到环境变量，或使用便携版
 
 **提示依赖安装失败？**
 → 检查网络连接，或手动执行 `pip install -r requirements.txt`
@@ -85,6 +115,7 @@ ordersync/
 - 每日节省 30+ 分钟手动录入时间
 - 消除人工复制粘贴导致的错漏风险
 - 多店铺统一管理，扩展新店铺只需加一个文件夹和一行配置
+- 便携版可一键分发给同事，无需安装任何环境
 
 ## 技术支持
 
