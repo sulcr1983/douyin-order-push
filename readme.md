@@ -15,8 +15,11 @@
 
 痛点 传统方式 我们的方案
 ⏱️ 效率低下 手动复制粘贴，200条订单需30分钟 2分钟 完成全量同步
+
 ❌ 数据错误 人工操作易漏、易错、格式混乱 自动映射字段，零误差
+
 🔄 状态滞后 订单状态变更需重新录入 智能识别变化，增量更新
+
 🏢 多店铺管理 多个后台来回切换，管理困难 统一入口，分店隔离
 
 ---
@@ -28,15 +31,20 @@
 订单状态更新 退款/发货后重新导出，自动识别变更订单 95%+
 多店铺管理 不同店铺分文件夹存放，一次运行全部同步 80%+
 
+
 ---
 
 ⚙️ 运行方式对比
 
 方式 操作 适用人群 技术门槛
-🖱️ 双击 BAT 运行订单同步.bat 普通用户（推荐） ⭐ 无
-🪟 图形界面 订单同步工具.pyw 需要可视日志的用户 ⭐ 无
-💻 命令行 python main.py 开发调试 ⭐⭐⭐
-📦 便携版 解压后双击 启动订单同步.bat 无需安装 Python 的任何人 ⭐ 无
+🖱️ 双击 BAT 运行订单同步.bat 普通用户（推荐） 
+⭐ 无
+🪟 图形界面 订单同步工具.pyw 需要可视日志的用户
+⭐ 无
+💻 命令行 python main.py 开发调试
+ ⭐⭐⭐
+📦 便携版 解压后双击 启动订单同步.bat 无需安装 Python 的任何人 
+⭐ 无
 
 ---
 
@@ -49,7 +57,9 @@
 cp .env.example .env
 
 # 填入企业微信智能表格的 Webhook 地址
+
 WECOM_WEBHOOK_URL_SHOP1=https://qyapi.weixin.qq.com/cgi-bin/wedoc/smartsheet/webhook?key=你的密钥1
+
 WECOM_WEBHOOK_URL_SHOP2=https://qyapi.weixin.qq.com/cgi-bin/wedoc/smartsheet/webhook?key=你的密钥2
 ```
 
@@ -60,6 +70,7 @@ WECOM_WEBHOOK_URL_SHOP2=https://qyapi.weixin.qq.com/cgi-bin/wedoc/smartsheet/web
 系统按文件夹名称区分不同店铺，你只需：
 
 1. 在项目根目录下新建店铺文件夹（如 店铺A/、店铺B/）
+
 2. 在 .env 中配置对应的 Webhook，格式为：
    ```
    WECOM_WEBHOOK_URL_店铺文件夹名=你的Webhook地址
@@ -71,6 +82,7 @@ WECOM_WEBHOOK_URL_SHOP2=https://qyapi.weixin.qq.com/cgi-bin/wedoc/smartsheet/web
 
 ```
 店铺A/           ← 放店铺A的订单 CSV/Excel
+
 店铺B/           ← 放店铺B的订单 CSV/Excel
 ```
 
@@ -79,6 +91,7 @@ WECOM_WEBHOOK_URL_SHOP2=https://qyapi.weixin.qq.com/cgi-bin/wedoc/smartsheet/web
 第四步：双击运行
 
 · 有 Python 环境 → 双击 运行订单同步.bat
+
 · 无 Python 环境 → 使用便携版，双击 启动订单同步.bat
 
 ✅ 完成！订单已同步至企业微信智能表格
@@ -88,6 +101,7 @@ WECOM_WEBHOOK_URL_SHOP2=https://qyapi.weixin.qq.com/cgi-bin/wedoc/smartsheet/web
 🔗 字段映射表
 
 企业微信表格字段 ID 可在 .env 中自定义配置：
+
 
 配置项 字段 ID 业务含义
 FIELD_SUB_ORDER_ID fxNwEq 子订单编号
@@ -111,6 +125,7 @@ FIELD_OUTBOUND_STATUS fzFeek 出库状态
 
 方案 命令 压缩包大小 特点
 Nuitka 打包 nuitka --standalone main.py ~30MB 高性能，启动快
+
 嵌入式 Python portable/ 目录脚本 ~30MB 零报毒，解压即用
 
 ✅ 便携版解压后约 80MB，压缩包约 30MB，无需安装任何环境，双击即可运行。
@@ -142,9 +157,13 @@ ordersync/
 
 问题 解决方案
 ❌ 双击没反应？ 检查 Python 环境，或直接使用便携版
+
 ❌ 依赖安装失败？ 检查网络，或手动执行 pip install -r requirements.txt
+
 ❌ 企业微信没收到数据？ 检查 .env 中的 Webhook URL 是否正确
+
 ❌ 文件读取报错？ 关闭 Excel 后重试（文件被占用）
+
 ❌ 想加新店铺？ 新建文件夹 + .env 加一行 Webhook 配置
 
 ---
@@ -152,10 +171,15 @@ ordersync/
 💰 商业价值
 
 维度 价值体现
+
 ⏰ 时间成本 每日节省 30+ 分钟 手动录入时间
+
 🎯 准确性 消除人工复制粘贴导致的错漏风险（降至 0）
+
 📈 可扩展性 新增店铺只需加一个文件夹 + 一行配置
+
 👥 团队协作 便携版可一键分发给所有人，无需培训
+
 🔧 维护成本 单文件架构，零数据库、零服务器
 
 ---
